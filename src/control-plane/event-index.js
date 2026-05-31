@@ -83,8 +83,7 @@ export function eventIndexPath(projectRoot = process.cwd(), options = {}) {
     || process.env.BRIDGE_EVENT_INDEX_PATH
     || (process.env.BRIDGE_STATE_ROOT || options.bridgeStateRoot
       ? bridgeStatePath('bridge-event-index.sqlite', options)
-      : null)
-    || join(projectRoot, '.omx', 'state', 'bridge-event-index.sqlite');
+      : join(projectRoot, '.codex', 'state', 'bridge-event-index.sqlite'));
 }
 
 export function eventIndexConfig(options = {}) {
@@ -568,8 +567,8 @@ export function pendingEvents(db, sink, options = {}) {
           e.event_type = 'SessionStart'
           AND json_extract(e.session_json, '$.status') = 'active'
           AND json_extract(e.session_json, '$.codexSessionId') IS NOT NULL
-          AND json_extract(e.session_json, '$.omxSessionId') IS NOT NULL
-          AND json_extract(e.session_json, '$.codexSessionId') != json_extract(e.session_json, '$.omxSessionId')
+          AND json_extract(e.session_json, '$.lifecycleSessionId') IS NOT NULL
+          AND json_extract(e.session_json, '$.codexSessionId') != json_extract(e.session_json, '$.lifecycleSessionId')
           AND e.updated_at >= ?
         )
       )`);

@@ -42,5 +42,5 @@ export class LockManager {
 export const commandLocks = new LockManager();
 
 export function lockKeyForSession(session = {}) {
-  return session.codexThreadId || session.threadId || session.codexSessionId || session.bridgeSessionId || session.omxSessionId || null;
+  return session.codexThreadId || session.threadId || session.codexSessionId || session.bridgeSessionId || session.lifecycleSessionId || null;
 }

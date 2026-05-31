@@ -5,11 +5,12 @@ import { ensureDirFor, readJsonl } from './jsonl.js';
 import { nextAssistantAfter, readCodexLog, userMessages } from './codex-log.js';
 import { bridgeStatePath } from './bridge-paths.js';
 
-export function bridgeLogPath(projectRoot = process.cwd(), options = {}) {
+export function bridgeLogPath(_projectRoot = process.cwd(), options = {}) {
+  const projectRoot = _projectRoot;
   return process.env.BRIDGE_LOG_PATH
     || (process.env.BRIDGE_STATE_ROOT || options.bridgeStateRoot
       ? bridgeStatePath('bridge-interactions.jsonl', options)
-      : join(projectRoot, '.omx', 'logs', 'bridge-interactions.jsonl'));
+      : join(projectRoot, '.codex', 'logs', 'bridge-interactions.jsonl'));
 }
 
 export async function recordCommand(session, commandText, options = {}) {
@@ -17,7 +18,7 @@ export async function recordCommand(session, commandText, options = {}) {
   const entry = {
     interactionId: options.interactionId || randomUUID(),
     codexSessionId: session.codexSessionId,
-    omxSessionId: session.omxSessionId,
+    lifecycleSessionId: session.lifecycleSessionId,
     threadId: session.threadId,
     tmuxId: session.tmuxId,
     tmuxPaneId: session.tmuxPaneId,
@@ -56,9 +57,9 @@ export async function readBridgeCommands(session, options = {}) {
   return records.filter((record) => {
     if (isDryRunBridgeCommand(record)) return false;
     if (!commandWithinSessionWindow(record, session)) return false;
-    return [record.codexSessionId, record.omxSessionId, record.threadId, record.tmuxId, record.tmuxPaneId]
+    return [record.codexSessionId, record.lifecycleSessionId, record.threadId, record.tmuxId, record.tmuxPaneId]
       .filter(Boolean)
-      .some((value) => [session.codexSessionId, session.omxSessionId, session.threadId, session.tmuxId, session.tmuxPaneId].includes(value));
+      .some((value) => [session.codexSessionId, session.lifecycleSessionId, session.threadId, session.tmuxId, session.tmuxPaneId].includes(value));
   });
 }
 

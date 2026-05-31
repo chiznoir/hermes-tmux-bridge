@@ -6,13 +6,13 @@ import { join } from 'node:path';
 import { readBridgeCommands } from '../src/interactions.js';
 
 test('readBridgeCommands ignores stale commands from reused tmux panes outside the session window', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-bridge-interactions-'));
-  await mkdir(join(root, '.omx', 'logs'), { recursive: true });
-  await writeFile(join(root, '.omx', 'logs', 'bridge-interactions.jsonl'), [
+  const root = await mkdtemp(join(tmpdir(), 'codex-bridge-interactions-'));
+  await mkdir(join(root, '.codex', 'logs'), { recursive: true });
+  await writeFile(join(root, '.codex', 'logs', 'bridge-interactions.jsonl'), [
     {
       interactionId: 'stale-pane-command',
       codexSessionId: 'old-codex',
-      omxSessionId: 'old-omx',
+      lifecycleSessionId: 'old-codex',
       threadId: 'old-codex',
       tmuxId: 'old-tmux',
       tmuxPaneId: '%58',
@@ -23,7 +23,7 @@ test('readBridgeCommands ignores stale commands from reused tmux panes outside t
     {
       interactionId: 'current-pane-command',
       codexSessionId: 'current-codex',
-      omxSessionId: 'current-omx',
+      lifecycleSessionId: 'current-codex',
       threadId: 'current-codex',
       tmuxId: 'current-tmux',
       tmuxPaneId: '%58',
@@ -35,7 +35,7 @@ test('readBridgeCommands ignores stale commands from reused tmux panes outside t
 
   const commands = await readBridgeCommands({
     codexSessionId: 'current-codex',
-    omxSessionId: 'current-omx',
+    lifecycleSessionId: 'current-codex',
     threadId: 'current-codex',
     tmuxId: 'current-tmux',
     tmuxPaneId: '%58',

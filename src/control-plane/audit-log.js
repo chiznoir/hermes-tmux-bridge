@@ -4,11 +4,12 @@ import { randomUUID } from 'node:crypto';
 import { ensureDirFor, readJsonl } from '../jsonl.js';
 import { bridgeStatePath } from '../bridge-paths.js';
 
-export function auditLogPath(projectRoot = process.cwd(), options = {}) {
+export function auditLogPath(_projectRoot = process.cwd(), options = {}) {
+  const projectRoot = _projectRoot;
   return process.env.BRIDGE_AUDIT_LOG_PATH
     || (process.env.BRIDGE_STATE_ROOT || options.bridgeStateRoot
       ? bridgeStatePath('bridge-audit.jsonl', options)
-      : join(projectRoot, '.omx', 'logs', 'bridge-audit.jsonl'));
+      : join(projectRoot, '.codex', 'logs', 'bridge-audit.jsonl'));
 }
 
 export async function appendAudit(eventType, payload = {}, options = {}) {
@@ -37,7 +38,7 @@ export async function readAuditLog(filters = {}, options = {}) {
   const limit = Number.isFinite(Number(filters.limit)) ? Number(filters.limit) : 200;
   const records = await readJsonl(auditLogPath(options.projectRoot, options));
   return records
-    .filter((record) => !filters.sessionId || [record.sessionId, record.bridgeSessionId, record.codexThreadId, record.omxSessionId].includes(filters.sessionId))
+    .filter((record) => !filters.sessionId || [record.sessionId, record.bridgeSessionId, record.codexThreadId, record.lifecycleSessionId].includes(filters.sessionId))
     .filter((record) => !filters.threadId || record.codexThreadId === filters.threadId)
     .filter((record) => !filters.source || record.source === filters.source || record.backend === filters.source)
     .filter((record) => afterSince(record, filters.since))

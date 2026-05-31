@@ -18,7 +18,7 @@ export function projectChannelMapPath(options = {}) {
     options.projectChannelMapPath
     || process.env.BRIDGE_PROJECT_CHANNEL_MAP
     || process.env.BRIDGE_HERMES_PROJECT_CHANNEL_MAP
-    || join(homedir(), '.config', 'hermes-omx-bridge', 'project-channels.json'),
+    || join(homedir(), '.config', 'hermes-codex-bridge', 'project-channels.json'),
   );
 }
 
@@ -116,7 +116,7 @@ export function sessionThreadKeys(session = {}, options = {}) {
   const values = [
     options.discordSessionThreadKey,
     session.discordSessionThreadKey,
-    session.omxSessionId,
+    session.lifecycleSessionId,
     session.bridgeSessionId,
     session.codexThreadId,
     session.codexSessionId,
@@ -139,7 +139,7 @@ export function canonicalSessionThreadKey(session = {}, options = {}) {
   return String(
     options.discordSessionThreadKey
     || session.discordSessionThreadKey
-    || session.omxSessionId
+    || session.lifecycleSessionId
     || session.bridgeSessionId
     || session.codexThreadId
     || session.codexSessionId

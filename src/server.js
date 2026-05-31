@@ -92,7 +92,7 @@ function createRouter(options = {}) {
     projectRoot,
   };
   const lockManager = options.lockManager || commandLocks;
-  const authToken = options.authToken ?? process.env.OMX_BRIDGE_TOKEN ?? '';
+  const authToken = options.authToken ?? process.env.BRIDGE_TOKEN ?? '';
 
   return async function router(req, res) {
     try {
@@ -145,7 +145,7 @@ async function main() {
   const commandNotificationFlusher = createCommandNotificationFlusher({ notifier, hermesSink });
   if (commandNotificationFlusher) commandNotificationFlushers.push(commandNotificationFlusher);
   server.listen(port, host, () => {
-    console.log(`hermes-omx-bridge listening on http://${host}:${port}`);
+    console.log(`hermes-codex-bridge listening on http://${host}:${port}`);
     if (notifier.started) console.log('bridge Discord notifier enabled');
     if (hermesSink.started) console.log('bridge Hermes webhook sink enabled');
   });

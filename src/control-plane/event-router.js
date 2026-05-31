@@ -1,8 +1,8 @@
 import { findCodexLogBySessionId, isAuxiliaryCodexLog, readCodexLog } from '../codex-log.js';
 import { readBridgeCommands } from '../interactions.js';
 import { readAuditLog, auditEventToRouterEvent } from './audit-log.js';
-import { readOmxLogRecords, omxRecordToRouterEvent } from '../adapters/omx-logs.js';
-import { hookRecordToRouterEvent, readTmuxHookRecords } from '../adapters/omx-hooks.js';
+import { readBridgeLogRecords, bridgeRecordToRouterEvent } from '../adapters/bridge-lifecycle.js';
+import { hookRecordToRouterEvent, readTmuxHookRecords } from '../adapters/tmux-hooks.js';
 import { stripSyntheticNotificationContext } from '../synthetic-context.js';
 
 function codexEventType(event) {
@@ -19,7 +19,7 @@ function matchesSession(session = {}, ...values) {
     session.codexThreadId,
     session.codexSessionId,
     session.threadId,
-    session.omxSessionId,
+    session.lifecycleSessionId,
     session.tmuxId,
     session.tmuxPaneId,
   ].filter(Boolean));
@@ -78,9 +78,9 @@ async function hasPrimaryLogUserCommandAfterSessionStart(session = {}) {
 }
 
 async function shouldEmitSessionStart(session = {}) {
-  if (!session.startedAt || !hasValidTimestamp(session.startedAt) || session.hasOmxLifecycle === false) return false;
-  if (!session.omxSessionId || !session.codexSessionId || session.omxSessionId === session.codexSessionId) return true;
-  if (session.sessionLogMatchSource !== 'active-codex-log' && session.sessionLogMatchSource !== 'runtime-omx-session') return true;
+  if (!session.startedAt || !hasValidTimestamp(session.startedAt) || session.hasBridgeLifecycle === false) return false;
+  if (!session.lifecycleSessionId || !session.codexSessionId || session.lifecycleSessionId === session.codexSessionId) return true;
+  if (session.sessionLogMatchSource !== 'active-codex-log' && session.sessionLogMatchSource !== 'runtime-codex-session') return true;
   return hasPrimaryLogUserCommandAfterSessionStart(session);
 }
 
@@ -116,7 +116,7 @@ function bridgeCommandToRouterEvent(session = {}, command = {}) {
     ? `bridge-command:${command.interactionId}`
     : [
       'bridge-command',
-      session.bridgeSessionId || session.codexSessionId || session.omxSessionId || session.tmuxPaneId || session.tmuxId,
+      session.bridgeSessionId || session.codexSessionId || session.lifecycleSessionId || session.tmuxPaneId || session.tmuxId,
       command.submittedAt,
       normalizeComparableText(text),
     ].filter(Boolean).join(':');
@@ -172,7 +172,7 @@ export async function readCodexFallbackEvents(session = {}, options = {}) {
     session.codexThreadId,
     session.codexSessionId,
     session.threadId,
-    session.omxSessionId,
+    session.lifecycleSessionId,
   ].filter(Boolean));
   for (const command of bridgeCommands) {
     if (!command.codexSessionId || knownCodexIds.has(command.codexSessionId)) continue;
@@ -274,16 +274,16 @@ async function readCodexFallbackEventsForLog(session = {}, bridgeCommands = []) 
   return events;
 }
 
-export async function readOmxAdapterEvents(session = {}, options = {}) {
+export async function readBridgeAdapterEvents(session = {}, options = {}) {
   const projectRoot = options.projectRoot || process.cwd();
-  const omxRecords = await readOmxLogRecords(projectRoot);
+  const codexRecords = await readBridgeLogRecords(projectRoot);
   const hookRecords = await readTmuxHookRecords(projectRoot);
   const events = [];
 
-  for (const record of omxRecords) {
+  for (const record of codexRecords) {
     if (!matchesSession(session, record.session_id, record.native_session_id)) continue;
     if (!isWithinSessionWindow(record.timestamp || record._ts, session)) continue;
-    events.push(omxRecordToRouterEvent(record));
+    events.push(bridgeRecordToRouterEvent(record));
   }
   for (const record of hookRecords) {
     const paneId = record.target && typeof record.target === 'object' ? record.target.value : null;
@@ -298,9 +298,9 @@ export async function routeSessionEvents(session = {}, options = {}) {
   const projectRoot = options.projectRoot || process.cwd();
   const bridgeProjectRoot = options.bridgeProjectRoot || options.controlPlaneRoot || projectRoot;
   const events = [];
-  const sessionEventId = session.hasOmxLifecycle !== false && session.omxSessionId
-    ? session.omxSessionId
-    : session.bridgeSessionId || session.codexSessionId || session.threadId || session.tmuxPaneId || session.tmuxId || session.omxSessionId || 'unknown-session';
+  const sessionEventId = session.hasBridgeLifecycle !== false && session.lifecycleSessionId
+    ? session.lifecycleSessionId
+    : session.bridgeSessionId || session.codexSessionId || session.threadId || session.tmuxPaneId || session.tmuxId || session.lifecycleSessionId || 'unknown-session';
 
   if (await shouldEmitSessionStart(session)) {
     events.push({
@@ -308,18 +308,18 @@ export async function routeSessionEvents(session = {}, options = {}) {
       type: 'SessionStart',
       timestamp: session.startedAt,
       source: 'notification',
-      text: `새 세션을 시작했어.\nSession: ${session.omxSessionId}\nProject: ${session.project}\ntmux: ${session.tmuxId || ''}`.trim(),
-      backend: 'omx',
+      text: `새 세션을 시작했어.\nSession: ${session.lifecycleSessionId}\nProject: ${session.project}\ntmux: ${session.tmuxId || ''}`.trim(),
+      backend: 'codex',
     });
   }
-  if (session.endedAt && session.hasOmxLifecycle !== false) {
+  if (session.endedAt && session.hasBridgeLifecycle !== false) {
     events.push({
       eventId: `${sessionEventId}:end`,
       type: 'SessionEnd',
       timestamp: session.endedAt,
       source: 'notification',
-      text: `세션이 종료됐어.\nSession: ${session.omxSessionId}\nProject: ${session.project}\ntmux: ${session.tmuxId || ''}`.trim(),
-      backend: 'omx',
+      text: `세션이 종료됐어.\nSession: ${session.lifecycleSessionId}\nProject: ${session.project}\ntmux: ${session.tmuxId || ''}`.trim(),
+      backend: 'codex',
       durationMs: durationMs(session.startedAt, session.endedAt),
       reason: session.endReason || 'session_exit',
     });
@@ -328,7 +328,7 @@ export async function routeSessionEvents(session = {}, options = {}) {
   const bridgeCommands = await readBridgeCommands(session, { ...options, projectRoot: bridgeProjectRoot });
   events.push(...await readBridgeCommandEvents(session, { ...options, projectRoot: bridgeProjectRoot, bridgeCommands }));
   events.push(...await readCodexFallbackEvents(session, { ...options, bridgeCommands }));
-  events.push(...await readOmxAdapterEvents(session, { projectRoot }));
+  events.push(...await readBridgeAdapterEvents(session, { projectRoot }));
 
   const auditEvents = await readAuditLog({ sessionId: session.bridgeSessionId, threadId: session.codexThreadId }, { ...options, projectRoot: bridgeProjectRoot });
   for (const record of auditEvents) events.push(auditEventToRouterEvent(record));

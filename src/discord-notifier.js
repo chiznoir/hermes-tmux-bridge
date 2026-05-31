@@ -61,8 +61,7 @@ function statePath(projectRoot = process.cwd(), options = {}) {
   return process.env.BRIDGE_NOTIFY_STATE_PATH
     || (process.env.BRIDGE_STATE_ROOT || options.bridgeStateRoot
       ? bridgeStatePath('bridge-discord-notifier.json', options)
-      : null)
-    || join(projectRoot, '.omx', 'state', 'bridge-discord-notifier.json');
+      : join(projectRoot, '.codex', 'state', 'bridge-discord-notifier.json'));
 }
 
 async function readState(path) {
@@ -220,22 +219,22 @@ function allowedMentionsForEvent(event = {}, options = {}) {
 }
 
 function shouldPollSession(session = {}, options = {}) {
-  if (session.kind === 'omx-team' && suppressTeamWorkerNotifications(options)) return false;
-  if (session.isAuxiliaryCodexLog === true && session.hasOmxLifecycle !== true) return false;
+  if (session.kind === 'codex-team' && suppressTeamWorkerNotifications(options)) return false;
+  if (session.isAuxiliaryCodexLog === true && session.hasBridgeLifecycle !== true) return false;
   if (isNativeOnlyLifecyclePollution(session)) return false;
-  if (session.hasOmxLifecycle === false && options.allowCodexOnlySessionMonitoring !== true) return false;
+  if (session.hasBridgeLifecycle === false && options.allowCodexOnlySessionMonitoring !== true) return false;
   if (options.allowUnmappedCodexLogNotifications === true || includeUnmappedCodexLogs(options)) return true;
-  return session.hasOmxLifecycle !== false;
+  return session.hasBridgeLifecycle !== false;
 }
 
 function isNativeOnlyLifecyclePollution(session = {}) {
   if (session.lifecycleOwner) return false;
-  const omxSessionId = session.omxSessionId || session.session_id;
+  const lifecycleSessionId = session.lifecycleSessionId || session.session_id;
   const codexSessionId = session.codexSessionId || session.codex_session_id || session.threadId || session.thread_id;
-  return session.hasOmxLifecycle === true
-    && omxSessionId
+  return session.hasBridgeLifecycle === true
+    && lifecycleSessionId
     && codexSessionId
-    && omxSessionId === codexSessionId;
+    && lifecycleSessionId === codexSessionId;
 }
 
 function formatEventTime(timestamp) {
@@ -259,7 +258,7 @@ function inlineCode(value) {
 
 function sessionIdFor(session = {}) {
   return session.bridgeSessionId
-    || session.omxSessionId
+    || session.lifecycleSessionId
     || session.codexThreadId
     || session.codexSessionId
     || session.threadId
@@ -849,7 +848,7 @@ export async function pollDiscordNotifications(options = {}) {
   const projectRoot = options.projectRoot || process.cwd();
   const webhookUrl = Object.prototype.hasOwnProperty.call(options, 'webhookUrl')
     ? options.webhookUrl
-    : process.env.BRIDGE_DISCORD_WEBHOOK_URL || process.env.OMX_DISCORD_WEBHOOK_URL;
+    : process.env.BRIDGE_DISCORD_WEBHOOK_URL;
   const botToken = discordBotToken(options);
   const useBotChannelDelivery = Boolean(botToken) && options.preferWebhookDelivery !== true;
   if (!webhookUrl && !useBotChannelDelivery) return { ok: false, reason: 'missing-discord-destination', sent: 0 };
@@ -888,7 +887,7 @@ export async function pollDiscordNotifications(options = {}) {
     for (const session of sessions) {
       const events = await routeSessionEvents(session, {
         ...options,
-        projectRoot: session.omxProjectRoot || projectRoot,
+        projectRoot: session.lifecycleRoot || projectRoot,
         bridgeProjectRoot: projectRoot,
       });
       for (const event of events) {
@@ -1023,7 +1022,7 @@ export async function pollDiscordNotifications(options = {}) {
             timestamp: event.timestamp,
           },
           session: {
-            sessionId: session.omxSessionId || session.bridgeSessionId || session.codexSessionId || session.threadId || null,
+            sessionId: session.lifecycleSessionId || session.bridgeSessionId || session.codexSessionId || session.threadId || null,
             codexSessionId: session.codexSessionId || null,
             tmuxId: session.tmuxId || null,
             project: session.project || null,
@@ -1101,7 +1100,7 @@ export async function pollDiscordNotifications(options = {}) {
 }
 
 export function startDiscordNotifier(options = {}) {
-  const webhookUrl = options.webhookUrl || process.env.BRIDGE_DISCORD_WEBHOOK_URL || process.env.OMX_DISCORD_WEBHOOK_URL;
+  const webhookUrl = options.webhookUrl || process.env.BRIDGE_DISCORD_WEBHOOK_URL;
   const botToken = discordBotToken(options);
   const envEnabled = (process.env.BRIDGE_NOTIFY_ENABLED || '').toLowerCase() === 'true'
     || (process.env.BRIDGE_DISCORD_FAST_EVENTS_ENABLED || '').toLowerCase() === 'true';

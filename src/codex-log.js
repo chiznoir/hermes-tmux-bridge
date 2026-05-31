@@ -12,17 +12,17 @@ function textValue(value) {
   return asString(value.text) || asString(value.content) || '';
 }
 
-function extractOmxRuntimeContext(text) {
+function extractCodexRuntimeContext(text) {
   const source = String(text || '');
   if (!source) return {};
-  const block = source.match(/<!--\s*OMX:RUNTIME:START\s*-->([\s\S]*?)<!--\s*OMX:RUNTIME:END\s*-->/i)?.[1] || source;
-  const runtimeOmxSessionId = block.match(/\*\*Session:\*\*\s*`?([^`\s|]+)/i)?.[1] || null;
+  const block = source.match(/<!--\s*Codex:RUNTIME:START\s*-->([\s\S]*?)<!--\s*Codex:RUNTIME:END\s*-->/i)?.[1] || source;
+  const runtimeBridgeSessionId = block.match(/\*\*Session:\*\*\s*`?([^`\s|]+)/i)?.[1] || null;
   const runtimeTmuxId = block.match(/\*\*tmux:\*\*\s*`?([^`\s|]+)/i)?.[1] || null;
-  if (!runtimeOmxSessionId && !runtimeTmuxId) return {};
+  if (!runtimeBridgeSessionId && !runtimeTmuxId) return {};
   return {
-    runtimeOmxSessionId,
+    runtimeBridgeSessionId,
     runtimeTmuxId,
-    runtimeSessionContextSource: 'omx-runtime-block',
+    runtimeSessionContextSource: 'codex-runtime-block',
   };
 }
 
@@ -60,7 +60,7 @@ export async function readCodexLog(filePath) {
     approvalPolicy: null,
     sandboxPolicyType: null,
     permissionProfileType: null,
-    runtimeOmxSessionId: null,
+    runtimeBridgeSessionId: null,
     runtimeTmuxId: null,
     runtimeSessionContextSource: null,
     threadSource: null,
@@ -69,7 +69,7 @@ export async function readCodexLog(filePath) {
     parentThreadId: null,
     originator: null,
     sessionSource: null,
-    isOmxExploreHarness: false,
+    isCodexExploreHarness: false,
   };
   const messages = [];
   const events = [];
@@ -82,8 +82,8 @@ export async function readCodexLog(filePath) {
       meta.codexSessionId = asString(record.payload.id) || meta.codexSessionId;
       meta.startedAt = asString(record.payload.timestamp) || timestamp || meta.startedAt;
       meta.cwd = asString(record.payload.cwd) || meta.cwd;
-      const runtime = extractOmxRuntimeContext(textValue(record.payload.base_instructions));
-      meta.runtimeOmxSessionId = runtime.runtimeOmxSessionId || meta.runtimeOmxSessionId;
+      const runtime = extractCodexRuntimeContext(textValue(record.payload.base_instructions));
+      meta.runtimeBridgeSessionId = runtime.runtimeBridgeSessionId || meta.runtimeBridgeSessionId;
       meta.runtimeTmuxId = runtime.runtimeTmuxId || meta.runtimeTmuxId;
       meta.runtimeSessionContextSource = runtime.runtimeSessionContextSource || meta.runtimeSessionContextSource;
       meta.originator = asString(record.payload.originator) || meta.originator;
@@ -95,8 +95,8 @@ export async function readCodexLog(filePath) {
       meta.agentNickname = asString(record.payload.agent_nickname) || meta.agentNickname;
       meta.parentThreadId = asString(record.payload.source?.subagent?.thread_spawn?.parent_thread_id) || meta.parentThreadId;
       const baseInstructions = textValue(record.payload.base_instructions);
-      meta.isOmxExploreHarness = meta.isOmxExploreHarness
-        || /(?:^|\n)\s*#\s*OMX Explore Lightweight Instructions\b/i.test(baseInstructions);
+      meta.isCodexExploreHarness = meta.isCodexExploreHarness
+        || /(?:^|\n)\s*#\s*Codex Explore Lightweight Instructions\b/i.test(baseInstructions);
       return;
     }
 
@@ -219,7 +219,7 @@ export function userMessages(log) {
 
 export function isAuxiliaryCodexLog(log = {}) {
   if (log.threadSource === 'subagent') return true;
-  if (log.isOmxExploreHarness === true) return true;
+  if (log.isCodexExploreHarness === true) return true;
   const originator = String(log.originator || '').toLowerCase();
   const sessionSource = String(log.sessionSource || '').toLowerCase();
   return originator === 'codex_exec' || sessionSource === 'exec';

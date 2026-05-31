@@ -12,7 +12,7 @@ export function bridgeStateRoot(options = {}) {
   return expandHome(
     options.bridgeStateRoot
     || process.env.BRIDGE_STATE_ROOT
-    || join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'hermes-omx-bridge'),
+    || join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'hermes-codex-bridge'),
   );
 }
 

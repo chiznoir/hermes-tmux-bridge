@@ -3,10 +3,10 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Install hermes-omx-bridge as a systemd service.
+Install hermes-codex-bridge as a systemd service.
 
 Default installs a per-user service so it can access the same user's ~/.codex,
-tmux socket, and local bridge state. Project OMX logs are discovered from live
+tmux socket, and local bridge state. Project Codex logs are discovered from live
 tmux panes by the bridge sink; pass --project-root only for an extra fixed scan
 root.
 
@@ -16,10 +16,10 @@ Usage:
 Options:
   --user                  Install systemd user service (default)
   --system                Install system service under /etc/systemd/system
-  --name NAME             Service name (default: hermes-omx-bridge)
+  --name NAME             Service name (default: hermes-codex-bridge)
   --host HOST             Bind host (default: 127.0.0.1)
   --port PORT             HTTP port (default: 3037)
-  --project-root PATH     Optional fixed OMX project root to scan
+  --project-root PATH     Optional fixed Codex project root to scan
   --repo-root PATH        Bridge repository root (default: parent of scripts/)
   --state-root PATH       Bridge-owned state/log/cache root
   --token TOKEN           Bearer token for bridge API (optional for 127.0.0.1)
@@ -30,7 +30,7 @@ Options:
   --no-notify             Disable bridge Discord notifier
   --sink                  Enable Hermes Gateway webhook sink
   --sink-url URL
-                           Hermes webhook endpoint (default: http://127.0.0.1:8644/webhooks/omx-bridge)
+                           Hermes webhook endpoint (default: http://127.0.0.1:8644/webhooks/codex-bridge)
   --secret SECRET
                            HMAC secret for Hermes webhook subscription
   --secret-file PATH
@@ -64,26 +64,26 @@ Options:
   -h, --help              Show this help
 
 Examples:
-  scripts/install-systemd-service.sh --token-file ~/.config/hermes/omx-bridge.token
-  scripts/install-systemd-service.sh --system --state-root /var/lib/hermes-omx-bridge --token 'change-me'
+  scripts/install-systemd-service.sh --token-file ~/.config/hermes/codex-bridge.token
+  scripts/install-systemd-service.sh --system --state-root /var/lib/hermes-codex-bridge --token 'change-me'
 USAGE
 }
 
 scope="user"
-name="hermes-omx-bridge"
+name="hermes-codex-bridge"
 host="127.0.0.1"
 port="3037"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 project_root=""
 state_root=""
-token="${OMX_BRIDGE_TOKEN:-}"
+token="${BRIDGE_TOKEN:-}"
 token_file=""
 webhook=""
 webhook_file=""
 notify_enabled="false"
 hermes_webhook_enabled="false"
-hermes_webhook_url="${BRIDGE_HERMES_WEBHOOK_URL:-http://127.0.0.1:8644/webhooks/omx-bridge}"
+hermes_webhook_url="${BRIDGE_HERMES_WEBHOOK_URL:-http://127.0.0.1:8644/webhooks/codex-bridge}"
 hermes_webhook_secret="${BRIDGE_HERMES_WEBHOOK_SECRET:-}"
 hermes_webhook_secret_file=""
 hermes_default_channel_id="${BRIDGE_HERMES_DEFAULT_CHANNEL_ID:-}"
@@ -180,20 +180,16 @@ if [[ -z "$npm_bin" ]]; then
 fi
 
 repo_root="$(cd "$repo_root" && pwd)"
-if [[ -z "$webhook" ]]; then
-  webhook="$(read_env_key OMX_DISCORD_WEBHOOK_URL "$repo_root/.env")"
-fi
-
 if [[ "$scope" == "user" ]]; then
   service_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-  default_env_dir="${XDG_CONFIG_HOME:-$HOME/.config}/hermes-omx-bridge"
-  default_state_root="${XDG_STATE_HOME:-$HOME/.local/state}/hermes-omx-bridge"
+  default_env_dir="${XDG_CONFIG_HOME:-$HOME/.config}/hermes-codex-bridge"
+  default_state_root="${XDG_STATE_HOME:-$HOME/.local/state}/hermes-codex-bridge"
   systemctl_cmd=(systemctl --user)
   service_path="$service_dir/$name.service"
 else
   service_dir="/etc/systemd/system"
-  default_env_dir="/etc/hermes-omx-bridge"
-  default_state_root="/var/lib/hermes-omx-bridge"
+  default_env_dir="/etc/hermes-codex-bridge"
+  default_state_root="/var/lib/hermes-codex-bridge"
   systemctl_cmd=(systemctl)
   service_path="$service_dir/$name.service"
 fi
@@ -211,7 +207,7 @@ escaped_path_value="${path_value//\\/\\\\}"
 escaped_path_value="${escaped_path_value//\"/\\\"}"
 
 service_content="[Unit]
-Description=Hermes OMX Bridge
+Description=Hermes Codex Bridge
 After=network.target
 
 [Service]
@@ -277,7 +273,7 @@ fi
 if [[ "$hermes_webhook_enabled" == "true" && "$hermes_notification_mode" != "direct" ]]; then
   append_env BRIDGE_HERMES_NOTIFICATION_MODE "$hermes_notification_mode"
 fi
-user_default_channel_map="${XDG_CONFIG_HOME:-$HOME/.config}/hermes-omx-bridge/project-channels.json"
+user_default_channel_map="${XDG_CONFIG_HOME:-$HOME/.config}/hermes-codex-bridge/project-channels.json"
 if [[ "$hermes_webhook_enabled" == "true" && -n "$project_channel_map" ]]; then
   if [[ "$scope" == "system" || "$project_channel_map" != "$user_default_channel_map" ]]; then
     append_env BRIDGE_HERMES_PROJECT_CHANNEL_MAP "$project_channel_map"
@@ -313,11 +309,11 @@ if [[ -n "$hermes_config_path" ]]; then
   fi
 fi
 if [[ -n "$token" ]]; then
-  env_content+="OMX_BRIDGE_TOKEN=$token
+  env_content+="BRIDGE_TOKEN=$token
 "
 else
   cat >&2 <<'WARN'
-NOTE: OMX_BRIDGE_TOKEN is empty. This is acceptable for same-host
+NOTE: BRIDGE_TOKEN is empty. This is acceptable for same-host
 HOST=127.0.0.1 deployments. Set --token or --token-file before exposing the
 bridge through Docker, LAN, reverse proxy, or public interfaces.
 WARN
@@ -329,7 +325,7 @@ write_file() {
   local mode="${3:-0644}"
   if [[ "$dry_run" == "1" ]]; then
     local printable="$content"
-    printable="$(printf '%s' "$printable" | sed -E 's#(OMX_BRIDGE_TOKEN=).*#\1<redacted>#; s#(BRIDGE_DISCORD_WEBHOOK_URL=).*#\1<redacted>#; s#(BRIDGE_HERMES_WEBHOOK_SECRET=).*#\1<redacted>#; s#(BRIDGE_DISCORD_BOT_TOKEN=).*#\1<redacted>#')"
+    printable="$(printf '%s' "$printable" | sed -E 's#(BRIDGE_TOKEN=).*#\1<redacted>#; s#(BRIDGE_DISCORD_WEBHOOK_URL=).*#\1<redacted>#; s#(BRIDGE_HERMES_WEBHOOK_SECRET=).*#\1<redacted>#; s#(BRIDGE_DISCORD_BOT_TOKEN=).*#\1<redacted>#')"
     printf '\n--- %s ---\n%s\n' "$path" "$printable"
     return
   fi

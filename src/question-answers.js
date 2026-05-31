@@ -8,18 +8,20 @@ const VALID_ANSWER_KINDS = new Set(['option', 'multi', 'text', 'other']);
 const VALID_QUESTION_TYPES = new Set(['single-answerable', 'multi-answerable', 'free-text']);
 const answerLocks = new Map();
 
-export function questionAnswersLogPath(projectRoot = process.cwd(), options = {}) {
+export function questionAnswersLogPath(_projectRoot = process.cwd(), options = {}) {
+  const projectRoot = _projectRoot;
   return process.env.BRIDGE_QUESTION_ANSWERS_PATH
     || (process.env.BRIDGE_STATE_ROOT || options.bridgeStateRoot
       ? bridgeStatePath('bridge-question-answers.jsonl', options)
-      : join(projectRoot, '.omx', 'state', 'bridge-question-answers.jsonl'));
+      : join(projectRoot, '.codex', 'state', 'bridge-question-answers.jsonl'));
 }
 
-export function questionRequestsLogPath(projectRoot = process.cwd(), options = {}) {
+export function questionRequestsLogPath(_projectRoot = process.cwd(), options = {}) {
+  const projectRoot = _projectRoot;
   return process.env.BRIDGE_QUESTION_REQUESTS_PATH
     || (process.env.BRIDGE_STATE_ROOT || options.bridgeStateRoot
       ? bridgeStatePath('bridge-question-requests.jsonl', options)
-      : join(projectRoot, '.omx', 'state', 'bridge-question-requests.jsonl'));
+      : join(projectRoot, '.codex', 'state', 'bridge-question-requests.jsonl'));
 }
 
 function cleanString(value) {
@@ -147,7 +149,7 @@ function sessionIds(session = {}) {
     session.codexThreadId,
     session.codexSessionId,
     session.threadId,
-    session.omxSessionId,
+    session.lifecycleSessionId,
     session.tmuxId,
     session.tmuxPaneId,
   ].filter(Boolean);
@@ -165,7 +167,7 @@ function attachSession(record, session = {}) {
     codexThreadId: session.codexThreadId || null,
     codexSessionId: session.codexSessionId || null,
     threadId: session.threadId || null,
-    omxSessionId: session.omxSessionId || null,
+    lifecycleSessionId: session.lifecycleSessionId || null,
     tmuxId: session.tmuxId || null,
     tmuxPaneId: session.tmuxPaneId || null,
   };
@@ -270,7 +272,7 @@ export async function recordQuestionAnswer(session, body = {}, options = {}) {
   if (!validation.ok) return validation;
 
   const lockKey = [
-    session.bridgeSessionId || session.codexSessionId || session.omxSessionId || session.tmuxPaneId || 'unknown-session',
+    session.bridgeSessionId || session.codexSessionId || session.lifecycleSessionId || session.tmuxPaneId || 'unknown-session',
     normalized.questionId,
     discordInteractionId || componentCustomId || 'no-interaction-id',
   ].join(':');

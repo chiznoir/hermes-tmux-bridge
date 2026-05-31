@@ -10,17 +10,17 @@ export function projectNameFromCwd(cwd) {
 
 export function teamWorkerSourceCwd(cwd) {
   const normalized = String(cwd || '').trim().replaceAll('\\', '/');
-  const marker = '/.omx/team/';
+  const marker = '/.codex/team/';
   const markerIndex = normalized.indexOf(marker);
   if (markerIndex <= 0) return null;
   return normalized.slice(0, markerIndex);
 }
 
-export function projectCwdForSession(cwd, sourceCwd, omxProjectRoot) {
+export function projectCwdForSession(cwd, sourceCwd, lifecycleRoot) {
   return teamWorkerSourceCwd(sourceCwd)
     || sourceCwd
     || teamWorkerSourceCwd(cwd)
-    || teamWorkerSourceCwd(omxProjectRoot)
+    || teamWorkerSourceCwd(lifecycleRoot)
     || cwd;
 }
 
@@ -35,9 +35,9 @@ export function mergeSessionEntry(previous = {}, entry = {}) {
   const merged = {
     ...previous,
     ...compact,
-    omxSessionId: entry.omxSessionId || previous.omxSessionId,
+    lifecycleSessionId: entry.lifecycleSessionId || previous.lifecycleSessionId,
     codexSessionId: entry.codexSessionId || previous.codexSessionId,
-    hasOmxLifecycle: previous.hasOmxLifecycle === true || entry.hasOmxLifecycle === true,
+    hasBridgeLifecycle: previous.hasBridgeLifecycle === true || entry.hasBridgeLifecycle === true,
     lifecycleOwner: entry.lifecycleOwner || previous.lifecycleOwner,
   };
   const startMs = Date.parse(merged.startedAt || '');
@@ -46,8 +46,8 @@ export function mergeSessionEntry(previous = {}, entry = {}) {
     delete merged.endedAt;
     delete merged.endedAtSource;
     delete merged.endReason;
-    if (entry.endedAt && previous.omxSessionId && entry.omxSessionId && entry.omxSessionId !== previous.omxSessionId) {
-      merged.omxSessionId = previous.omxSessionId;
+    if (entry.endedAt && previous.lifecycleSessionId && entry.lifecycleSessionId && entry.lifecycleSessionId !== previous.lifecycleSessionId) {
+      merged.lifecycleSessionId = previous.lifecycleSessionId;
       merged.lifecycleOwner = previous.lifecycleOwner;
       if (previous.pid !== undefined) merged.pid = previous.pid;
       if (previous.cwd) merged.cwd = previous.cwd;
@@ -57,10 +57,10 @@ export function mergeSessionEntry(previous = {}, entry = {}) {
 }
 
 export function sessionIndexKey(entry = {}) {
-  if (entry.hasOmxLifecycle === true && entry.omxSessionId) {
-    return entry.omxSessionId;
+  if (entry.hasBridgeLifecycle === true && entry.lifecycleSessionId) {
+    return entry.lifecycleSessionId;
   }
-  return entry.codexSessionId || entry.omxSessionId;
+  return entry.codexSessionId || entry.lifecycleSessionId;
 }
 
 export function isNativeOnlyStartRecord(record = {}) {
@@ -85,16 +85,16 @@ export function replacedNativeSessionIds(records = []) {
     .filter(Boolean));
 }
 
-export function hasExplicitOmxOwnerMetadata(record = {}) {
+export function hasExplicitCodexOwnerMetadata(record = {}) {
   const owner = String(record.lifecycle_owner || record.lifecycleOwner || record.owner || '').toLowerCase();
-  return owner === 'omx' || owner === 'omx-bridge' || record.user_facing === true || record.userFacing === true;
+  return owner === 'codex' || owner === 'codex-bridge' || record.user_facing === true || record.userFacing === true;
 }
 
 export function isOwnedLifecycleEntry(record = {}, ownedSessionIds = new Set()) {
-  const sessionId = asString(record.session_id) || asString(record.omxSessionId);
+  const sessionId = asString(record.session_id) || asString(record.lifecycleSessionId);
   const nativeSessionId = asString(record.native_session_id) || asString(record.nativeSessionId);
   if (!sessionId) return false;
-  if (hasExplicitOmxOwnerMetadata(record)) return true;
+  if (hasExplicitCodexOwnerMetadata(record)) return true;
   if (ownedSessionIds.has(sessionId)) return true;
   if (!nativeSessionId) return true;
   return nativeSessionId !== sessionId;
@@ -112,7 +112,7 @@ export function firstSetValue(values = new Set()) {
 
 export function sessionMarkerInCmdline(cmdline, sessionId) {
   if (!cmdline || !sessionId) return false;
-  return String(cmdline).includes(`/.omx/state/sessions/${sessionId}/`)
+  return String(cmdline).includes(`/.codex/state/sessions/${sessionId}/`)
     || String(cmdline).includes(`/sessions/${sessionId}/AGENTS.md`);
 }
 
@@ -185,8 +185,8 @@ export function preferredEntryForCodexLog(byCodex, log = {}) {
   if (matches.length === 0) return null;
   const [key, entry] = matches
     .sort(([, left], [, right]) => {
-      const leftCurrentRank = left.isCurrentState === true && left.hasOmxLifecycle === true && !left.endedAt ? 0 : 1;
-      const rightCurrentRank = right.isCurrentState === true && right.hasOmxLifecycle === true && !right.endedAt ? 0 : 1;
+      const leftCurrentRank = left.isCurrentState === true && left.hasBridgeLifecycle === true && !left.endedAt ? 0 : 1;
+      const rightCurrentRank = right.isCurrentState === true && right.hasBridgeLifecycle === true && !right.endedAt ? 0 : 1;
       if (leftCurrentRank !== rightCurrentRank) return leftCurrentRank - rightCurrentRank;
       const leftActiveRank = left.endedAt ? 1 : 0;
       const rightActiveRank = right.endedAt ? 1 : 0;
@@ -197,8 +197,8 @@ export function preferredEntryForCodexLog(byCodex, log = {}) {
 }
 
 export function codexLogResumedInCurrentState(entry = {}, log = {}) {
-  if (entry.hasOmxLifecycle !== true || entry.endedAt) return false;
-  if (!entry.omxSessionId || !entry.codexSessionId || entry.omxSessionId === entry.codexSessionId) return false;
+  if (entry.hasBridgeLifecycle !== true || entry.endedAt) return false;
+  if (!entry.lifecycleSessionId || !entry.codexSessionId || entry.lifecycleSessionId === entry.codexSessionId) return false;
   const currentStart = entry.currentStateStartedAt || entry.startedAt;
   const currentStartMs = Date.parse(currentStart || '');
   const logStartMs = Date.parse(log.startedAt || '');
@@ -213,13 +213,13 @@ export function codexLogAttachmentMetadata(entry = {}, log = {}, fallbackSource 
     sessionLogMatchSource: resumedCodexSession ? 'current-state-resumed-codex-log' : fallbackSource,
     resumedCodexSession: resumedCodexSession || undefined,
     resumedCodexSessionStartedAt: resumedCodexSession ? log.startedAt : undefined,
-    previousRuntimeOmxSessionId: resumedCodexSession ? log.runtimeOmxSessionId : undefined,
+    previousRuntimeBridgeSessionId: resumedCodexSession ? log.runtimeBridgeSessionId : undefined,
   };
 }
 
 export function sessionDeduplicationKey(session = {}) {
   return [
-    session.omxSessionId || '',
+    session.lifecycleSessionId || '',
     session.codexSessionId || session.threadId || '',
   ].join('\0');
 }
@@ -227,9 +227,9 @@ export function sessionDeduplicationKey(session = {}) {
 export function sessionDeduplicationRank(session = {}) {
   return [
     session.resumedCodexSession === true ? 1 : 0,
-    session.sessionLogOwnerMatch === 'runtime-omx-session' ? 1 : 0,
+    session.sessionLogOwnerMatch === 'runtime-codex-session' ? 1 : 0,
     session.tmuxId || session.tmuxPaneId ? 1 : 0,
-    session.hasOmxLifecycle === true ? 1 : 0,
+    session.hasBridgeLifecycle === true ? 1 : 0,
     session.status === 'active' ? 1 : session.status === 'unknown' ? 0 : -1,
     sortableMs(session.lastEventAt || session.startedAt),
   ];
@@ -266,7 +266,7 @@ export function clearEndedAtForResumedCodexLog(entry = {}, log = {}, options = {
   if (!entry.endedAt || !codexLogHasUserMessageAfter(log, entry.endedAt)) return entry;
   const currentOwnerCodexIds = options.currentOwnerCodexIds || new Set();
   if (
-    entry.hasOmxLifecycle === true
+    entry.hasBridgeLifecycle === true
     && log.codexSessionId
     && currentOwnerCodexIds.has(log.codexSessionId)
   ) {
@@ -288,8 +288,8 @@ export function canonicalProjectRoot(root) {
 }
 
 export function codexLogOwnerMatchSource(log = {}, entry = {}) {
-  if (log.runtimeOmxSessionId && entry.omxSessionId && log.runtimeOmxSessionId === entry.omxSessionId) {
-    return 'runtime-omx-session';
+  if (log.runtimeBridgeSessionId && entry.lifecycleSessionId && log.runtimeBridgeSessionId === entry.lifecycleSessionId) {
+    return 'runtime-codex-session';
   }
   return null;
 }

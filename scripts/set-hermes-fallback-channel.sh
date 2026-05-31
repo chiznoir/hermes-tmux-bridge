@@ -6,20 +6,20 @@ usage() {
 Usage:
   scripts/set-hermes-fallback-channel.sh CHANNEL_ID [options]
 
-Update the Hermes OMX Bridge fallback Discord channel in both:
+Update the Hermes Codex Bridge fallback Discord channel in both:
   - project channel map default
   - bridge service env fallback keys
 
 Options:
   --map PATH           Channel map path
                        (default: $BRIDGE_HERMES_PROJECT_CHANNEL_MAP or
-                        ~/.config/hermes-omx-bridge/project-channels.json)
+                        ~/.config/hermes-codex-bridge/project-channels.json)
   --env-file PATH      Bridge service env file
-                       (default: ~/.config/hermes-omx-bridge/hermes-omx-bridge.env)
+                       (default: ~/.config/hermes-codex-bridge/hermes-codex-bridge.env)
   --restart            Restart the user systemd bridge service after updating
   --no-restart         Do not restart the service (default)
   --service NAME       systemd --user service name
-                       (default: hermes-omx-bridge.service)
+                       (default: hermes-codex-bridge.service)
   --dry-run            Print intended changes without writing files
   -h, --help           Show this help
 
@@ -34,9 +34,9 @@ die() {
 }
 
 channel_id=""
-channel_map="${BRIDGE_HERMES_PROJECT_CHANNEL_MAP:-$HOME/.config/hermes-omx-bridge/project-channels.json}"
-env_file="$HOME/.config/hermes-omx-bridge/hermes-omx-bridge.env"
-service_name="hermes-omx-bridge.service"
+channel_map="${BRIDGE_HERMES_PROJECT_CHANNEL_MAP:-$HOME/.config/hermes-codex-bridge/project-channels.json}"
+env_file="$HOME/.config/hermes-codex-bridge/hermes-codex-bridge.env"
+service_name="hermes-codex-bridge.service"
 restart=false
 dry_run=false
 
@@ -138,7 +138,7 @@ if [[ "$restart" == "true" ]]; then
 fi
 
 if command -v curl >/dev/null 2>&1; then
-  bridge_url="${OMX_BRIDGE_URL:-http://127.0.0.1:3037}"
+  bridge_url="${BRIDGE_URL:-http://127.0.0.1:3037}"
   printf 'Current bridge fallback probe:\n'
   curl -fsS "$bridge_url/projects/__missing_probe__/channel" || true
   printf '\n'

@@ -31,8 +31,8 @@ function prettyJson(value) {
 }
 
 test('raw HTTP JSON responses preserve pretty body, content-type, content-length, auth, and error quirks', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-route-contract-'));
-  await mkdir(join(root, '.omx', 'logs'), { recursive: true });
+  const root = await mkdtemp(join(tmpdir(), 'codex-route-contract-'));
+  await mkdir(join(root, '.codex', 'logs'), { recursive: true });
   const authServerOptions = { projectRoot: root, codexHome: join(root, 'codex-home'), authToken: 'secret-token' };
 
   const health = await requestRaw(createServer(authServerOptions), '/health');
@@ -64,29 +64,29 @@ test('raw HTTP JSON responses preserve pretty body, content-type, content-length
 });
 
 test('helper CLI scripts keep bridge API selection and payload contracts visible', async () => {
-  const send = await readFile('bin/omx-send', 'utf8');
+  const send = await readFile('bin/codex-send', 'utf8');
   assert.match(send, /mode는 auto\|tmux\|codex 중 하나/);
   assert.match(send, /--discord-approval/);
   assert.match(send, /--answer-approval/);
   assert.match(send, /--question-id/);
   assert.match(send, /\/sessions\/\$session_id\/question-answers/);
-  assert.match(send, /discord-hermes-omx-send/);
+  assert.match(send, /discord-hermes-codex-send/);
   assert.match(send, /\/sessions\?activity=false&limit=\$session_list_limit/);
   assert.match(send, /select\(\.project==\$project and \.status!="ended"\)/);
   assert.match(send, /\{commandText:\$text, mode:\$mode, dryRun:\$dry, submit:\$submit, normalize:\$normalize\}/);
   assert.match(send, /\{approvalGate:\$approval_gate\}/);
   assert.match(send, /-X POST "\$bridge_url\/sessions\/\$session_id\/commands"/);
 
-  const kill = await readFile('bin/omx-kill', 'utf8');
+  const kill = await readFile('bin/codex-kill', 'utf8');
   assert.match(kill, /"\$bridge_url\/sessions"/);
-  assert.match(kill, /\.bridgeSessionId==\$id or \.codexSessionId==\$id or \.omxSessionId==\$id or \.tmuxId==\$id or \.tmuxPaneId==\$id/);
+  assert.match(kill, /\.bridgeSessionId==\$id or \.codexSessionId==\$id or \.lifecycleSessionId==\$id or \.tmuxId==\$id or \.tmuxPaneId==\$id/);
   assert.match(kill, /select\(\.project==\$project and \.status!="ended" and \(\.tmuxId != null\)\)/);
   assert.match(kill, /비대화형 환경에서는 --force가 필요합니다/);
   assert.match(kill, /tmux kill-session -t "\$tmux_id"/);
 });
 
 test('event-index schema and delivery transition columns stay contract-frozen', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-schema-contract-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-schema-contract-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const db = index.db;
@@ -101,12 +101,12 @@ test('event-index schema and delivery transition columns stay contract-frozen', 
     assert.deepEqual(columnNames('codex_log_cursors'), ['log_path', 'codex_session_id', 'last_line', 'first_seen_at', 'updated_at']);
 
     const event = { eventId: 'event-1', type: 'CommandSubmitted', source: 'codex-log', timestamp: '2026-05-06T08:00:00.000Z', text: 'hello' };
-    const session = { bridgeSessionId: 'bridge-1', project: 'omx-bridge', omxSessionId: 'omx-1' };
+    const session = { bridgeSessionId: 'bridge-1', project: 'codex-bridge', lifecycleSessionId: 'codex-1' };
     upsertEvents(db, [{ eventId: 'event-1', event, session }]);
     markDeliveryPrepared(db, 'event-1', 'contract-sink', { chunks: ['hello'] }, {
       targetChannelId: 'channel-1',
       targetThreadId: 'thread-1',
-      targetThreadName: 'omx-thread',
+      targetThreadName: 'codex-thread',
       targetKind: 'session-thread',
     });
     let delivery = db.prepare('SELECT status, retry_count, target_channel_id, target_thread_id, target_thread_name, target_kind, payload_json FROM deliveries WHERE event_id = ? AND sink = ?').get('event-1', 'contract-sink');
@@ -114,7 +114,7 @@ test('event-index schema and delivery transition columns stay contract-frozen', 
     assert.equal(delivery.retry_count, 0);
     assert.equal(delivery.target_channel_id, 'channel-1');
     assert.equal(delivery.target_thread_id, 'thread-1');
-    assert.equal(delivery.target_thread_name, 'omx-thread');
+    assert.equal(delivery.target_thread_name, 'codex-thread');
     assert.equal(delivery.target_kind, 'session-thread');
     assert.match(delivery.payload_json, /"chunks"/);
 
@@ -128,7 +128,7 @@ test('event-index schema and delivery transition columns stay contract-frozen', 
     markDeliverySent(db, 'event-1', 'contract-sink', {
       targetChannelId: 'channel-1',
       targetThreadId: 'thread-1',
-      targetThreadName: 'omx-thread',
+      targetThreadName: 'codex-thread',
       targetKind: 'session-thread',
     });
     delivery = db.prepare('SELECT status, retry_count, next_attempt_at, last_error, target_channel_id, target_thread_id, target_thread_name, target_kind FROM deliveries WHERE event_id = ? AND sink = ?').get('event-1', 'contract-sink');
@@ -138,7 +138,7 @@ test('event-index schema and delivery transition columns stay contract-frozen', 
     assert.equal(delivery.last_error, null);
     assert.equal(delivery.target_channel_id, 'channel-1');
     assert.equal(delivery.target_thread_id, 'thread-1');
-    assert.equal(delivery.target_thread_name, 'omx-thread');
+    assert.equal(delivery.target_thread_name, 'codex-thread');
     assert.equal(delivery.target_kind, 'session-thread');
     assert.deepEqual(pendingEvents(db, 'contract-sink'), []);
   } finally {

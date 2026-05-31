@@ -10,8 +10,8 @@ export function codexOwnerSessions(sessions = []) {
       byCodexId.set(session.codexSessionId, session);
       continue;
     }
-    const existingScore = (existing.status === 'active' ? 4 : 0) + (existing.hasOmxLifecycle === true ? 2 : 0) + (existing.resumedCodexSession === true ? 1 : 0);
-    const score = (session.status === 'active' ? 4 : 0) + (session.hasOmxLifecycle === true ? 2 : 0) + (session.resumedCodexSession === true ? 1 : 0);
+    const existingScore = (existing.status === 'active' ? 4 : 0) + (existing.hasBridgeLifecycle === true ? 2 : 0) + (existing.resumedCodexSession === true ? 1 : 0);
+    const score = (session.status === 'active' ? 4 : 0) + (session.hasBridgeLifecycle === true ? 2 : 0) + (session.resumedCodexSession === true ? 1 : 0);
     if (score > existingScore) byCodexId.set(session.codexSessionId, session);
   }
   return byCodexId;
@@ -30,7 +30,7 @@ export function currentOwnerSessionForPendingEvent(session = {}, event = {}, eve
   if (!codexSessionId) return session;
   const owner = liveCodexOwners.get(codexSessionId);
   if (!owner) return session;
-  if (session.omxSessionId && owner.omxSessionId && session.omxSessionId === owner.omxSessionId) return session;
+  if (session.lifecycleSessionId && owner.lifecycleSessionId && session.lifecycleSessionId === owner.lifecycleSessionId) return session;
   if (session.project && owner.project && session.project !== owner.project) return session;
   return owner;
 }

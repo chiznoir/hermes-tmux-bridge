@@ -1,9 +1,8 @@
 {
-  "name": "hermes-omx-bridge",
+  "name": "hermes-codex-bridge",
   "version": "0.1.0",
   "type": "module",
-  "private": true,
-  "description": "raw-http bridge between hermes and oh-my-codex/tmux session state",
+  "description": "raw-http bridge between Hermes and Codex/tmux session state",
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test",

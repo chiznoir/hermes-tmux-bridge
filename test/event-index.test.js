@@ -35,7 +35,7 @@ test('normalizeEventId hashes fallback text instead of embedding large payloads'
 });
 
 test('markDeliverySent stores Discord delivery target metadata idempotently', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-delivery-target-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-delivery-target-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     upsertEvents(index.db, [{
@@ -51,7 +51,7 @@ test('markDeliverySent stores Discord delivery target metadata idempotently', as
     markDeliverySent(index.db, 'event-1', 'discord-fast', {
       targetChannelId: 'thread-1',
       targetThreadId: 'thread-1',
-      targetThreadName: 'omx-docs-101814',
+      targetThreadName: 'codex-docs-101814',
       targetKind: 'session-thread',
     });
 
@@ -63,7 +63,7 @@ test('markDeliverySent stores Discord delivery target metadata idempotently', as
     assert.deepEqual(row, {
       target_channel_id: 'thread-1',
       target_thread_id: 'thread-1',
-      target_thread_name: 'omx-docs-101814',
+      target_thread_name: 'codex-docs-101814',
       target_kind: 'session-thread',
     });
   } finally {
@@ -72,7 +72,7 @@ test('markDeliverySent stores Discord delivery target metadata idempotently', as
 });
 
 test('upsertEvents deduplicates bridge fast command and codex-log command notifications', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-command-dedupe-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-command-dedupe-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   const session = { bridgeSessionId: 'bridge-1', codexSessionId: 'codex-1', project: 'auto-zonedata' };
   try {
@@ -117,7 +117,7 @@ test('upsertEvents deduplicates bridge fast command and codex-log command notifi
 });
 
 test('upsertEvents keeps separate repeated bridge commands with the same text', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-command-repeat-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-command-repeat-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   const session = { bridgeSessionId: 'bridge-1', codexSessionId: 'codex-1', project: 'auto-zonedata' };
   try {
@@ -156,11 +156,11 @@ test('upsertEvents keeps separate repeated bridge commands with the same text', 
 });
 
 test('sent delivery target metadata is immutable audit evidence on later retarget attempts', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-sent-target-immutable-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-sent-target-immutable-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     upsertEvents(index.db, [{
-      session: { bridgeSessionId: 'codex-old', codexSessionId: 'codex-old', omxSessionId: 'omx-old', project: 'docs' },
+      session: { bridgeSessionId: 'codex-old', codexSessionId: 'codex-old', lifecycleSessionId: 'codex-old', project: 'docs' },
       event: {
         eventId: 'codex-resumed:message-99',
         type: 'CommandSubmitted',
@@ -172,12 +172,12 @@ test('sent delivery target metadata is immutable audit evidence on later retarge
     markDeliverySent(index.db, 'codex-resumed:message-99', 'discord-fast', {
       targetChannelId: 'old-thread',
       targetThreadId: 'old-thread',
-      targetThreadName: 'omx-docs-old',
+      targetThreadName: 'codex-docs-old',
       targetKind: 'session-thread',
     });
 
     upsertEvents(index.db, [{
-      session: { bridgeSessionId: 'codex-resumed', codexSessionId: 'codex-resumed', omxSessionId: 'omx-new', project: 'docs' },
+      session: { bridgeSessionId: 'codex-resumed', codexSessionId: 'codex-resumed', lifecycleSessionId: 'codex-new', project: 'docs' },
       event: {
         eventId: 'codex-resumed:message-99',
         type: 'CommandSubmitted',
@@ -189,13 +189,13 @@ test('sent delivery target metadata is immutable audit evidence on later retarge
     markDeliveryPrepared(index.db, 'codex-resumed:message-99', 'discord-fast', { chunks: ['# User Command\nresume prompt'] }, {
       targetChannelId: 'new-thread',
       targetThreadId: 'new-thread',
-      targetThreadName: 'omx-docs-new',
+      targetThreadName: 'codex-docs-new',
       targetKind: 'session-thread',
     });
     markDeliverySent(index.db, 'codex-resumed:message-99', 'discord-fast', {
       targetChannelId: 'new-thread',
       targetThreadId: 'new-thread',
-      targetThreadName: 'omx-docs-new',
+      targetThreadName: 'codex-docs-new',
       targetKind: 'session-thread',
     });
 
@@ -207,14 +207,14 @@ test('sent delivery target metadata is immutable audit evidence on later retarge
     assert.equal(row.status, 'sent');
     assert.equal(row.target_channel_id, 'old-thread');
     assert.equal(row.target_thread_id, 'old-thread');
-    assert.equal(row.target_thread_name, 'omx-docs-old');
+    assert.equal(row.target_thread_name, 'codex-docs-old');
     assert.equal(row.target_kind, 'session-thread');
     assert.match(row.last_error, /sent delivery target mismatch/);
 
     markDeliverySent(index.db, 'codex-resumed:message-99', 'discord-fast', {
       targetChannelId: 'old-thread',
       targetThreadId: 'old-thread',
-      targetThreadName: 'omx-docs-old',
+      targetThreadName: 'codex-docs-old',
       targetKind: 'session-thread',
     });
     const idempotentRow = index.db.prepare(`
@@ -230,7 +230,7 @@ test('sent delivery target metadata is immutable audit evidence on later retarge
 });
 
 test('markDeliveryPrepared stores the exact outbound payload snapshot', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-delivery-payload-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-delivery-payload-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     upsertEvents(index.db, [{
@@ -314,10 +314,10 @@ test('markDeliveryPrepared stores the exact outbound payload snapshot', async ()
 });
 
 test('event index compacts by high-water/low-water without deleting failed deliveries', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
-    const session = { bridgeSessionId: 'bridge-1', project: 'omx-bridge' };
+    const session = { bridgeSessionId: 'bridge-1', project: 'codex-bridge' };
     const items = Array.from({ length: 7 }, (_, index) => ({
       session,
       eventId: `event-${index + 1}`,
@@ -356,10 +356,10 @@ test('event index compacts by high-water/low-water without deleting failed deliv
 });
 
 test('pendingEvents returns only the older due retry before newer same-session events', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-pending-priority-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-pending-priority-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
-    const session = { bridgeSessionId: 'bridge-1', project: 'omx-bridge' };
+    const session = { bridgeSessionId: 'bridge-1', project: 'codex-bridge' };
     upsertEvents(index.db, [
       {
         session,
@@ -400,12 +400,12 @@ test('pendingEvents returns only the older due retry before newer same-session e
 });
 
 test('pendingEvents holds newer cross-session events behind an older unresolved retry for the same sink', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-cross-session-fifo-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-cross-session-fifo-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     upsertEvents(index.db, [
       {
-        session: { bridgeSessionId: 'bridge-old', project: 'omx-bridge' },
+        session: { bridgeSessionId: 'bridge-old', project: 'codex-bridge' },
         event: {
           eventId: 'old-session-failed',
           type: 'CommandSubmitted',
@@ -415,7 +415,7 @@ test('pendingEvents holds newer cross-session events behind an older unresolved 
         },
       },
       {
-        session: { bridgeSessionId: 'bridge-new', project: 'omx-bridge' },
+        session: { bridgeSessionId: 'bridge-new', project: 'codex-bridge' },
         event: {
           eventId: 'new-session-pending',
           type: 'CommandSubmitted',
@@ -443,10 +443,10 @@ test('pendingEvents holds newer cross-session events behind an older unresolved 
 });
 
 test('pendingEvents holds newer same-session events while an older retry is unresolved', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-retry-hold-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-retry-hold-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
-    const session = { bridgeSessionId: 'bridge-hold', project: 'omx-bridge' };
+    const session = { bridgeSessionId: 'bridge-hold', project: 'codex-bridge' };
     upsertEvents(index.db, [
       {
         session,
@@ -512,10 +512,10 @@ test('pendingEvents holds newer same-session events while an older retry is unre
 });
 
 test('pendingEvents can hold fast commands behind prior final-answer delivery', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-prior-delivery-block-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-prior-delivery-block-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
-    const session = { bridgeSessionId: 'bridge-queue', project: 'omx-bridge' };
+    const session = { bridgeSessionId: 'bridge-queue', project: 'codex-bridge' };
     upsertEvents(index.db, [
       {
         session,
@@ -575,10 +575,10 @@ test('pendingEvents can hold fast commands behind prior final-answer delivery', 
 });
 
 test('pendingEvents keeps delayed prior delivery errors observable before releasing commands', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-prior-delivery-error-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-prior-delivery-error-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
-    const session = { bridgeSessionId: 'bridge-queue', project: 'omx-bridge' };
+    const session = { bridgeSessionId: 'bridge-queue', project: 'codex-bridge' };
     upsertEvents(index.db, [
       {
         session,
@@ -649,10 +649,10 @@ test('pendingEvents keeps delayed prior delivery errors observable before releas
 });
 
 test('pendingEvents only grace-holds missing prior delivery rows briefly', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-prior-delivery-grace-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-prior-delivery-grace-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
-    const session = { bridgeSessionId: 'bridge-queue', project: 'omx-bridge' };
+    const session = { bridgeSessionId: 'bridge-queue', project: 'codex-bridge' };
     upsertEvents(index.db, [
       {
         session,
@@ -707,14 +707,14 @@ test('pendingEvents only grace-holds missing prior delivery rows briefly', async
 
 
 test('markSkippedBeforeDeliveries makes boot-cutoff skips observable and non-pending', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-skipped-before-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-skipped-before-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const session = {
       bridgeSessionId: 'codex-cutoff',
       codexSessionId: 'codex-cutoff',
-      omxSessionId: 'omx-cutoff',
-      project: 'omx-bridge',
+      lifecycleSessionId: 'codex-cutoff',
+      project: 'codex-bridge',
       status: 'active',
     };
     upsertEvents(index.db, [
@@ -768,11 +768,11 @@ test('markSkippedBeforeDeliveries makes boot-cutoff skips observable and non-pen
 });
 
 test('failed deliveries stay durable but wait until next_attempt_at before retry', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-retry-window-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-retry-window-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     upsertEvents(index.db, [{
-      session: { bridgeSessionId: 'bridge-1', project: 'omx-bridge' },
+      session: { bridgeSessionId: 'bridge-1', project: 'codex-bridge' },
       event: {
         eventId: 'retry-me',
         type: 'FinalAnswer',
@@ -821,11 +821,11 @@ test('failed deliveries stay durable but wait until next_attempt_at before retry
 });
 
 test('failed deliveries stop retrying after max attempts and compact after expiry', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-retry-dead-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-retry-dead-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     upsertEvents(index.db, [{
-      session: { bridgeSessionId: 'bridge-dead', project: 'omx-bridge' },
+      session: { bridgeSessionId: 'bridge-dead', project: 'codex-bridge' },
       event: {
         eventId: 'retry-dead',
         type: 'FinalAnswer',
@@ -891,12 +891,12 @@ test('failed deliveries stop retrying after max attempts and compact after expir
 });
 
 test('event index compaction preserves undelivered pending events', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-pending-compact-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-pending-compact-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     upsertEvents(index.db, [
       {
-        session: { bridgeSessionId: 'pending-old', project: 'omx-bridge' },
+        session: { bridgeSessionId: 'pending-old', project: 'codex-bridge' },
         event: {
           eventId: 'pending-old:answer',
           type: 'FinalAnswer',
@@ -907,7 +907,7 @@ test('event index compaction preserves undelivered pending events', async () => 
         },
       },
       {
-        session: { bridgeSessionId: 'sent-old', project: 'omx-bridge' },
+        session: { bridgeSessionId: 'sent-old', project: 'codex-bridge' },
         event: {
           eventId: 'sent-old:answer',
           type: 'FinalAnswer',
@@ -938,11 +938,11 @@ test('event index compaction preserves undelivered pending events', async () => 
 });
 
 test('event index refreshes pending session mapping after Codex slash command reconciles a new native id', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-reconcile-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-reconcile-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const event = {
-      eventId: 'omx-new-visible:start',
+      eventId: 'codex-new-visible:start',
       type: 'SessionStart',
       source: 'notification',
       timestamp: '2026-05-09T00:00:00.000Z',
@@ -950,8 +950,8 @@ test('event index refreshes pending session mapping after Codex slash command re
     };
     upsertEvents(index.db, [{
       session: {
-        bridgeSessionId: 'omx-new-visible',
-        omxSessionId: 'omx-new-visible',
+        bridgeSessionId: 'codex-new-visible',
+        lifecycleSessionId: 'codex-new-visible',
         project: 'news-insight',
       },
       event,
@@ -962,28 +962,28 @@ test('event index refreshes pending session mapping after Codex slash command re
         bridgeSessionId: 'codex-new-thread',
         codexThreadId: 'codex-new-thread',
         codexSessionId: 'codex-new-thread',
-        omxSessionId: 'omx-new-visible',
+        lifecycleSessionId: 'codex-new-visible',
         project: 'news-insight',
       },
       event,
     }]);
 
     const [pending] = pendingEvents(index.db, 'hermes', { eventTypes: new Set(['SessionStart']), limit: 10 });
-    assert.equal(pending.eventId, 'omx-new-visible:start');
+    assert.equal(pending.eventId, 'codex-new-visible:start');
     assert.equal(pending.session.bridgeSessionId, 'codex-new-thread');
     assert.equal(pending.session.codexSessionId, 'codex-new-thread');
-    assert.equal(pending.session.omxSessionId, 'omx-new-visible');
+    assert.equal(pending.session.lifecycleSessionId, 'codex-new-visible');
   } finally {
     closeEventIndex(index);
   }
 });
 
 test('event index emits SessionLinked instead of resending SessionStart when Codex slash command remaps native id', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-requeue-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-requeue-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const event = {
-      eventId: 'omx-visible:start',
+      eventId: 'codex-visible:start',
       type: 'SessionStart',
       source: 'notification',
       timestamp: '2026-05-09T00:00:00.000Z',
@@ -994,13 +994,13 @@ test('event index emits SessionLinked instead of resending SessionStart when Cod
         bridgeSessionId: 'codex-old-thread',
         codexThreadId: 'codex-old-thread',
         codexSessionId: 'codex-old-thread',
-        omxSessionId: 'omx-visible',
-        project: 'omx-bridge',
+        lifecycleSessionId: 'codex-visible',
+        project: 'codex-bridge',
         status: 'active',
       },
       event,
     }]);
-    markDeliverySent(index.db, 'omx-visible:start', 'hermes');
+    markDeliverySent(index.db, 'codex-visible:start', 'hermes');
     assert.deepEqual(
       pendingEvents(index.db, 'hermes', { eventTypes: new Set(['SessionStart']), limit: 10 }).map((item) => item.eventId),
       [],
@@ -1011,8 +1011,8 @@ test('event index emits SessionLinked instead of resending SessionStart when Cod
         bridgeSessionId: 'codex-new-thread',
         codexThreadId: 'codex-new-thread',
         codexSessionId: 'codex-new-thread',
-        omxSessionId: 'omx-visible',
-        project: 'omx-bridge',
+        lifecycleSessionId: 'codex-visible',
+        project: 'codex-bridge',
         status: 'active',
       },
       event,
@@ -1024,7 +1024,7 @@ test('event index emits SessionLinked instead of resending SessionStart when Cod
     );
 
     const [pending] = pendingEvents(index.db, 'hermes', { eventTypes: new Set(['SessionLinked']), limit: 10 });
-    assert.equal(pending.eventId, 'omx-visible:start:linked:codex-new-thread');
+    assert.equal(pending.eventId, 'codex-visible:start:linked:codex-new-thread');
     assert.equal(pending.event.type, 'SessionLinked');
     assert.equal(pending.event.previousCodexSessionId, 'codex-old-thread');
     assert.equal(pending.event.codexSessionId, 'codex-new-thread');
@@ -1046,11 +1046,11 @@ test('event index emits SessionLinked instead of resending SessionStart when Cod
 });
 
 test('event index keeps SessionEnd idempotent after native id reconciliation', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-end-reconcile-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-end-reconcile-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const event = {
-      eventId: 'omx-visible:end',
+      eventId: 'codex-visible:end',
       type: 'SessionEnd',
       source: 'notification',
       timestamp: '2026-05-14T01:25:00.000Z',
@@ -1058,17 +1058,17 @@ test('event index keeps SessionEnd idempotent after native id reconciliation', a
     };
     upsertEvents(index.db, [{
       session: {
-        bridgeSessionId: 'omx-visible',
-        omxSessionId: 'omx-visible',
+        bridgeSessionId: 'codex-visible',
+        lifecycleSessionId: 'codex-visible',
         project: 'docs',
         status: 'ended',
       },
       event,
     }]);
-    markDeliverySent(index.db, 'omx-visible:end', 'discord-fast', {
+    markDeliverySent(index.db, 'codex-visible:end', 'discord-fast', {
       targetChannelId: 'thread-old',
       targetThreadId: 'thread-old',
-      targetThreadName: 'omx-docs-012500',
+      targetThreadName: 'codex-docs-012500',
       targetKind: 'session-thread',
     });
 
@@ -1077,7 +1077,7 @@ test('event index keeps SessionEnd idempotent after native id reconciliation', a
         bridgeSessionId: 'codex-new-thread',
         codexThreadId: 'codex-new-thread',
         codexSessionId: 'codex-new-thread',
-        omxSessionId: 'omx-visible',
+        lifecycleSessionId: 'codex-visible',
         project: 'docs',
         status: 'ended',
       },
@@ -1097,12 +1097,12 @@ test('event index keeps SessionEnd idempotent after native id reconciliation', a
   }
 });
 
-test('event index does not emit SessionLinked when runtime owner contradicts the session OMX id', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-runtime-owner-mismatch-'));
+test('event index does not emit SessionLinked when runtime owner contradicts the session Codex id', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-runtime-owner-mismatch-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const event = {
-      eventId: 'omx-visible:start',
+      eventId: 'codex-visible:start',
       type: 'SessionStart',
       source: 'notification',
       timestamp: '2026-05-09T00:00:00.000Z',
@@ -1113,22 +1113,22 @@ test('event index does not emit SessionLinked when runtime owner contradicts the
         bridgeSessionId: 'codex-old-thread',
         codexThreadId: 'codex-old-thread',
         codexSessionId: 'codex-old-thread',
-        omxSessionId: 'omx-visible',
+        lifecycleSessionId: 'codex-visible',
         project: 'docs',
         status: 'active',
       },
       event,
     }]);
-    markDeliverySent(index.db, 'omx-visible:start', 'discord-fast');
+    markDeliverySent(index.db, 'codex-visible:start', 'discord-fast');
 
     upsertEvents(index.db, [{
       session: {
         bridgeSessionId: 'codex-new-thread',
         codexThreadId: 'codex-new-thread',
         codexSessionId: 'codex-new-thread',
-        omxSessionId: 'omx-visible',
-        runtimeOmxSessionId: 'omx-other-visible',
-        sessionLogOwnerMatch: 'runtime-omx-session',
+        lifecycleSessionId: 'codex-visible',
+        runtimeBridgeSessionId: 'codex-other-visible',
+        sessionLogOwnerMatch: 'runtime-codex-session',
         project: 'docs',
         status: 'active',
       },
@@ -1145,11 +1145,11 @@ test('event index does not emit SessionLinked when runtime owner contradicts the
 });
 
 test('event index emits SessionLinked for current /resume even when log runtime metadata is stale', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-current-resume-stale-runtime-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-current-resume-stale-runtime-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const event = {
-      eventId: 'omx-current-thread:start',
+      eventId: 'codex-current-thread:start',
       type: 'SessionStart',
       source: 'notification',
       timestamp: '2026-05-24T17:17:31.000Z',
@@ -1160,21 +1160,21 @@ test('event index emits SessionLinked for current /resume even when log runtime 
         bridgeSessionId: 'codex-old-thread',
         codexThreadId: 'codex-old-thread',
         codexSessionId: 'codex-old-thread',
-        omxSessionId: 'omx-current-thread',
+        lifecycleSessionId: 'codex-current-thread',
         project: 'news-insight',
         status: 'active',
       },
       event,
     }]);
-    markDeliverySent(index.db, 'omx-current-thread:start', 'discord-fast');
+    markDeliverySent(index.db, 'codex-current-thread:start', 'discord-fast');
 
     upsertEvents(index.db, [{
       session: {
         bridgeSessionId: 'codex-resumed-thread',
         codexThreadId: 'codex-resumed-thread',
         codexSessionId: 'codex-resumed-thread',
-        omxSessionId: 'omx-current-thread',
-        runtimeOmxSessionId: 'omx-old-ended-thread',
+        lifecycleSessionId: 'codex-current-thread',
+        runtimeBridgeSessionId: 'codex-old-ended-thread',
         resumedCodexSession: true,
         project: 'news-insight',
         status: 'active',
@@ -1183,8 +1183,8 @@ test('event index emits SessionLinked for current /resume even when log runtime 
     }]);
 
     const [pending] = pendingEvents(index.db, 'discord-fast', { eventTypes: new Set(['SessionLinked']), limit: 10 });
-    assert.equal(pending.eventId, 'omx-current-thread:start:linked:codex-resumed-thread');
-    assert.equal(pending.session.omxSessionId, 'omx-current-thread');
+    assert.equal(pending.eventId, 'codex-current-thread:start:linked:codex-resumed-thread');
+    assert.equal(pending.session.lifecycleSessionId, 'codex-current-thread');
     assert.equal(pending.session.codexSessionId, 'codex-resumed-thread');
     assert.equal(pending.session.resumedCodexSession, true);
   } finally {
@@ -1193,11 +1193,11 @@ test('event index emits SessionLinked for current /resume even when log runtime 
 });
 
 test('event index emits SessionLinked when /resume claims a Codex id after placeholder start was sent', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-current-resume-placeholder-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-current-resume-placeholder-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const event = {
-      eventId: 'omx-current-thread:start',
+      eventId: 'codex-current-thread:start',
       type: 'SessionStart',
       source: 'notification',
       timestamp: '2026-05-24T18:00:28.936Z',
@@ -1205,34 +1205,34 @@ test('event index emits SessionLinked when /resume claims a Codex id after place
     };
     upsertEvents(index.db, [{
       session: {
-        bridgeSessionId: 'omx-current-thread',
-        codexThreadId: 'omx-current-thread',
-        codexSessionId: 'omx-current-thread',
-        omxSessionId: 'omx-current-thread',
-        project: 'omx-bridge',
+        bridgeSessionId: 'codex-current-thread',
+        codexThreadId: 'codex-current-thread',
+        codexSessionId: 'codex-current-thread',
+        lifecycleSessionId: 'codex-current-thread',
+        project: 'codex-bridge',
         status: 'active',
       },
       event,
     }]);
-    markDeliverySent(index.db, 'omx-current-thread:start', 'discord-fast');
+    markDeliverySent(index.db, 'codex-current-thread:start', 'discord-fast');
 
     upsertEvents(index.db, [{
       session: {
         bridgeSessionId: 'codex-resumed-thread',
         codexThreadId: 'codex-resumed-thread',
         codexSessionId: 'codex-resumed-thread',
-        omxSessionId: 'omx-current-thread',
-        runtimeOmxSessionId: 'omx-old-ended-thread',
+        lifecycleSessionId: 'codex-current-thread',
+        runtimeBridgeSessionId: 'codex-old-ended-thread',
         resumedCodexSession: true,
-        project: 'omx-bridge',
+        project: 'codex-bridge',
         status: 'active',
       },
       event,
     }]);
 
     const [pending] = pendingEvents(index.db, 'discord-fast', { eventTypes: new Set(['SessionLinked']), limit: 10 });
-    assert.equal(pending.eventId, 'omx-current-thread:start:linked:codex-resumed-thread');
-    assert.equal(pending.event.previousCodexSessionId, 'omx-current-thread');
+    assert.equal(pending.eventId, 'codex-current-thread:start:linked:codex-resumed-thread');
+    assert.equal(pending.event.previousCodexSessionId, 'codex-current-thread');
     assert.equal(pending.event.codexSessionId, 'codex-resumed-thread');
     assert.equal(pending.session.resumedCodexSession, true);
   } finally {
@@ -1241,11 +1241,11 @@ test('event index emits SessionLinked when /resume claims a Codex id after place
 });
 
 test('event index emits only one SessionLinked when active Codex mapping flaps repeatedly', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-linked-flap-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-linked-flap-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const event = {
-      eventId: 'omx-visible:start',
+      eventId: 'codex-visible:start',
       type: 'SessionStart',
       source: 'notification',
       timestamp: '2026-05-09T00:00:00.000Z',
@@ -1255,16 +1255,16 @@ test('event index emits only one SessionLinked when active Codex mapping flaps r
       bridgeSessionId: codexSessionId,
       codexThreadId: codexSessionId,
       codexSessionId,
-      omxSessionId: 'omx-visible',
-      project: 'omx-bridge',
+      lifecycleSessionId: 'codex-visible',
+      project: 'codex-bridge',
       status: 'active',
     });
 
     upsertEvents(index.db, [{ session: session('codex-old-thread'), event }]);
-    markDeliverySent(index.db, 'omx-visible:start', 'hermes');
+    markDeliverySent(index.db, 'codex-visible:start', 'hermes');
     upsertEvents(index.db, [{ session: session('codex-new-thread-1'), event }]);
     const [first] = pendingEvents(index.db, 'hermes', { eventTypes: new Set(['SessionLinked']), limit: 10 });
-    assert.equal(first.eventId, 'omx-visible:start:linked:codex-new-thread-1');
+    assert.equal(first.eventId, 'codex-visible:start:linked:codex-new-thread-1');
     markDeliverySent(index.db, first.eventId, 'hermes');
 
     upsertEvents(index.db, [{ session: session('codex-new-thread-2'), event }]);
@@ -1279,11 +1279,11 @@ test('event index emits only one SessionLinked when active Codex mapping flaps r
 
 
 test('event index does not emit SessionLinked when initial native id is discovered', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-initial-native-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-initial-native-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const event = {
-      eventId: 'omx-initial:start',
+      eventId: 'codex-initial:start',
       type: 'SessionStart',
       source: 'notification',
       timestamp: '2026-05-11T00:00:00.000Z',
@@ -1292,29 +1292,29 @@ test('event index does not emit SessionLinked when initial native id is discover
 
     for (const initialSession of [
       {
-        bridgeSessionId: 'omx-initial',
-        omxSessionId: 'omx-initial',
+        bridgeSessionId: 'codex-initial',
+        lifecycleSessionId: 'codex-initial',
         project: 'news-insight',
         status: 'active',
       },
       {
-        bridgeSessionId: 'omx-placeholder',
-        codexThreadId: 'omx-initial',
-        codexSessionId: 'omx-initial',
-        omxSessionId: 'omx-initial',
+        bridgeSessionId: 'codex-placeholder',
+        codexThreadId: 'codex-initial',
+        codexSessionId: 'codex-initial',
+        lifecycleSessionId: 'codex-initial',
         project: 'news-insight',
         status: 'active',
       },
     ]) {
       upsertEvents(index.db, [{ session: initialSession, event }]);
-      markDeliverySent(index.db, 'omx-initial:start', 'discord-fast');
+      markDeliverySent(index.db, 'codex-initial:start', 'discord-fast');
 
       upsertEvents(index.db, [{
         session: {
           bridgeSessionId: '019e127f-089c-7a60-9f95-ab7924dd6fb6',
           codexThreadId: '019e127f-089c-7a60-9f95-ab7924dd6fb6',
           codexSessionId: '019e127f-089c-7a60-9f95-ab7924dd6fb6',
-          omxSessionId: 'omx-initial',
+          lifecycleSessionId: 'codex-initial',
           project: 'news-insight',
           status: 'active',
         },
@@ -1332,11 +1332,11 @@ test('event index does not emit SessionLinked when initial native id is discover
 });
 
 test('event index does not emit SessionLinked for non-active remaps', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-non-active-requeue-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-non-active-requeue-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const event = {
-      eventId: 'omx-ended:start',
+      eventId: 'codex-ended:start',
       type: 'SessionStart',
       source: 'notification',
       timestamp: 'unknown',
@@ -1346,20 +1346,20 @@ test('event index does not emit SessionLinked for non-active remaps', async () =
       session: {
         bridgeSessionId: 'codex-old-thread',
         codexSessionId: 'codex-old-thread',
-        omxSessionId: 'omx-ended',
-        project: 'omx-bridge',
+        lifecycleSessionId: 'codex-ended',
+        project: 'codex-bridge',
         status: 'ended',
       },
       event,
     }]);
-    markDeliverySent(index.db, 'omx-ended:start', 'discord-fast');
+    markDeliverySent(index.db, 'codex-ended:start', 'discord-fast');
 
     upsertEvents(index.db, [{
       session: {
         bridgeSessionId: 'codex-new-thread',
         codexSessionId: 'codex-new-thread',
-        omxSessionId: 'omx-ended',
-        project: 'omx-bridge',
+        lifecycleSessionId: 'codex-ended',
+        project: 'codex-bridge',
         status: 'ended',
       },
       event,
@@ -1379,11 +1379,11 @@ test('event index does not emit SessionLinked for non-active remaps', async () =
 });
 
 test('pendingEvents includes remapped SessionLinked after skipBefore without replaying old unsent starts', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-requeue-skipbefore-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-requeue-skipbefore-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const oldEvent = {
-      eventId: 'omx-old-unsent:start',
+      eventId: 'codex-old-unsent:start',
       type: 'SessionStart',
       source: 'notification',
       timestamp: '2026-05-09T00:00:00.000Z',
@@ -1393,26 +1393,26 @@ test('pendingEvents includes remapped SessionLinked after skipBefore without rep
       session: {
         bridgeSessionId: 'codex-old-unsent',
         codexSessionId: 'codex-old-unsent',
-        omxSessionId: 'omx-old-unsent',
-        project: 'omx-bridge',
+        lifecycleSessionId: 'codex-old-unsent',
+        project: 'codex-bridge',
       },
       event: oldEvent,
     }]);
 
     const remappedEvent = {
       ...oldEvent,
-      eventId: 'omx-remapped:start',
+      eventId: 'codex-remapped:start',
     };
     upsertEvents(index.db, [{
       session: {
         bridgeSessionId: 'codex-before-new',
         codexSessionId: 'codex-before-new',
-        omxSessionId: 'omx-remapped',
-        project: 'omx-bridge',
+        lifecycleSessionId: 'codex-remapped',
+        project: 'codex-bridge',
       },
       event: remappedEvent,
     }]);
-    markDeliverySent(index.db, 'omx-remapped:start', 'discord-fast');
+    markDeliverySent(index.db, 'codex-remapped:start', 'discord-fast');
 
     assert.deepEqual(
       pendingEvents(index.db, 'discord-fast', {
@@ -1428,8 +1428,8 @@ test('pendingEvents includes remapped SessionLinked after skipBefore without rep
         bridgeSessionId: 'codex-after-new',
         codexThreadId: 'codex-after-new',
         codexSessionId: 'codex-after-new',
-        omxSessionId: 'omx-remapped',
-        project: 'omx-bridge',
+        lifecycleSessionId: 'codex-remapped',
+        project: 'codex-bridge',
         status: 'active',
       },
       event: remappedEvent,
@@ -1449,7 +1449,7 @@ test('pendingEvents includes remapped SessionLinked after skipBefore without rep
         skipBefore: '2026-05-09T00:01:00.000Z',
         limit: 10,
       }).map((item) => item.eventId),
-      ['omx-remapped:start:linked:codex-after-new'],
+      ['codex-remapped:start:linked:codex-after-new'],
     );
   } finally {
     closeEventIndex(index);
@@ -1457,11 +1457,11 @@ test('pendingEvents includes remapped SessionLinked after skipBefore without rep
 });
 
 test('pendingEvents includes active remapped SessionStart for a new sink without replaying non-remapped starts', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-new-sink-remap-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-event-index-new-sink-remap-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
   try {
     const oldEvent = {
-      eventId: 'omx-active-not-remapped:start',
+      eventId: 'codex-active-not-remapped:start',
       type: 'SessionStart',
       source: 'notification',
       timestamp: '2026-05-09T00:00:00.000Z',
@@ -1469,17 +1469,17 @@ test('pendingEvents includes active remapped SessionStart for a new sink without
     };
     upsertEvents(index.db, [{
       session: {
-        bridgeSessionId: 'omx-active-not-remapped',
-        codexSessionId: 'omx-active-not-remapped',
-        omxSessionId: 'omx-active-not-remapped',
-        project: 'omx-bridge',
+        bridgeSessionId: 'codex-active-not-remapped',
+        codexSessionId: 'codex-active-not-remapped',
+        lifecycleSessionId: 'codex-active-not-remapped',
+        project: 'codex-bridge',
         status: 'active',
       },
       event: oldEvent,
     }]);
 
     const remappedEvent = {
-      eventId: 'omx-active-remapped:start',
+      eventId: 'codex-active-remapped:start',
       type: 'SessionStart',
       source: 'notification',
       timestamp: '2026-05-09T00:00:00.000Z',
@@ -1490,8 +1490,8 @@ test('pendingEvents includes active remapped SessionStart for a new sink without
         bridgeSessionId: 'codex-after-new',
         codexThreadId: 'codex-after-new',
         codexSessionId: 'codex-after-new',
-        omxSessionId: 'omx-active-remapped',
-        project: 'omx-bridge',
+        lifecycleSessionId: 'codex-active-remapped',
+        project: 'codex-bridge',
         status: 'active',
       },
       event: remappedEvent,
@@ -1503,7 +1503,7 @@ test('pendingEvents includes active remapped SessionStart for a new sink without
         skipBefore: '2026-05-09T00:01:00.000Z',
         limit: 10,
       }).map((item) => item.eventId),
-      ['omx-active-remapped:start'],
+      ['codex-active-remapped:start'],
     );
   } finally {
     closeEventIndex(index);

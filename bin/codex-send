@@ -2,8 +2,8 @@
 set -euo pipefail
 
 script_name="$(basename "$0")"
-bridge_url="${OMX_BRIDGE_URL:-http://127.0.0.1:3037}"
-token="${OMX_BRIDGE_TOKEN:-}"
+bridge_url="${BRIDGE_URL:-http://127.0.0.1:3037}"
+token="${BRIDGE_TOKEN:-}"
 session_id=""
 project=""
 mode="auto"
@@ -16,23 +16,23 @@ question_id=""
 edit_text=""
 list_only=0
 command_text=""
-session_list_limit="${OMX_SEND_SESSION_LIST_LIMIT:-50}"
+session_list_limit="${CODEX_SEND_SESSION_LIST_LIMIT:-50}"
 
 usage() {
   cat <<'USAGE'
 사용법:
-  omx-send --session SESSION_ID [--mode auto|tmux|codex] [--dry] [--hold] [--raw] PROMPT
-  omx-send --session SESSION_ID --discord-approval PROMPT
-  omx-send --session SESSION_ID --answer-approval send|reject --question-id QUESTION_ID
-  omx-send --session SESSION_ID --answer-approval modify --question-id QUESTION_ID --edit TEXT
-  omx-send --project PROJECT PROMPT
-  omx-send --list
+  codex-send --session SESSION_ID [--mode auto|tmux|codex] [--dry] [--hold] [--raw] PROMPT
+  codex-send --session SESSION_ID --discord-approval PROMPT
+  codex-send --session SESSION_ID --answer-approval send|reject --question-id QUESTION_ID
+  codex-send --session SESSION_ID --answer-approval modify --question-id QUESTION_ID --edit TEXT
+  codex-send --project PROJECT PROMPT
+  codex-send --list
 
 --list 출력 컬럼:
   bridgeSessionId, project, activityState, status, tmuxId, lastEventAt
 
 설명:
-  hermes-omx-bridge HTTP API로 OMX/Codex 세션에 지시를 보냅니다.
+  hermes-codex-bridge HTTP API로 Codex 세션에 지시를 보냅니다.
   기본 mode는 auto이며, live tmux 화면에 반드시 보여야 하면 --mode tmux를 사용합니다.
   기본적으로 Hermes/operator wrapper와 전달 prefix를 제거합니다.
   byte-for-byte에 가까운 전달이 필요할 때만 --raw/--no-normalize를 사용합니다.
@@ -40,16 +40,16 @@ usage() {
   승인 UI 응답은 --answer-approval로 /question-answers에 제출합니다.
 
 환경변수:
-  OMX_BRIDGE_URL    기본 http://127.0.0.1:3037
-  OMX_BRIDGE_TOKEN  설정된 경우 Authorization Bearer로 전송
-  OMX_SEND_SESSION_LIST_LIMIT  --list/--project 세션 조회 제한 (기본 50, all 허용)
+  BRIDGE_URL    기본 http://127.0.0.1:3037
+  BRIDGE_TOKEN  설정된 경우 Authorization Bearer로 전송
+  CODEX_SEND_SESSION_LIST_LIMIT  --list/--project 세션 조회 제한 (기본 50, all 허용)
 
 옵션:
   --url URL      bridge URL 변경
   --token TOKEN  Authorization Bearer token
   --limit N      --list/--project 세션 조회 제한
-  --approval-gate GATE  승인 gate 지정 (지원: discord-hermes-omx-send)
-  --discord-approval    --approval-gate discord-hermes-omx-send 축약형
+  --approval-gate GATE  승인 gate 지정 (지원: discord-hermes-codex-send)
+  --discord-approval    --approval-gate discord-hermes-codex-send 축약형
   --answer-approval ACTION  승인 응답 제출: send|reject|modify
   --question-id ID          승인 question id
   --edit TEXT               modify 응답의 추가수정 텍스트
@@ -78,7 +78,7 @@ while [[ $# -gt 0 ]]; do
     --raw|--no-normalize|--preserve-raw) normalize=0; shift ;;
     --normalize) normalize=1; shift ;;
     --approval-gate) [[ $# -ge 2 ]] || die "--approval-gate 뒤에 값이 필요합니다"; approval_gate="$2"; shift 2 ;;
-    --discord-approval) approval_gate="discord-hermes-omx-send"; shift ;;
+    --discord-approval) approval_gate="discord-hermes-codex-send"; shift ;;
     --answer-approval|--approval-answer) [[ $# -ge 2 ]] || die "$1 뒤에 send|reject|modify 값이 필요합니다"; approval_answer="$2"; shift 2 ;;
     --question-id) [[ $# -ge 2 ]] || die "--question-id 뒤에 id가 필요합니다"; question_id="$2"; shift 2 ;;
     --edit|--other-text) [[ $# -ge 2 ]] || die "$1 뒤에 추가수정 텍스트가 필요합니다"; edit_text="$2"; shift 2 ;;
@@ -93,8 +93,8 @@ done
 require_cmd curl
 require_cmd jq
 [[ "$mode" =~ ^(auto|tmux|codex)$ ]] || die "mode는 auto|tmux|codex 중 하나여야 합니다"
-if [[ -n "$approval_gate" && "$approval_gate" != "discord-hermes-omx-send" ]]; then
-  die "approval gate는 discord-hermes-omx-send만 지원합니다"
+if [[ -n "$approval_gate" && "$approval_gate" != "discord-hermes-codex-send" ]]; then
+  die "approval gate는 discord-hermes-codex-send만 지원합니다"
 fi
 if [[ -n "$approval_answer" && ! "$approval_answer" =~ ^(send|reject|modify)$ ]]; then
   die "--answer-approval은 send|reject|modify 중 하나여야 합니다"

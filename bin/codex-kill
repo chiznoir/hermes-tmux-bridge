@@ -2,20 +2,21 @@
 set -euo pipefail
 
 script_name="$(basename "$0")"
-bridge_url="${OMX_BRIDGE_URL:-http://127.0.0.1:3037}"
-token="${OMX_BRIDGE_TOKEN:-}"
+bridge_url="${BRIDGE_URL:-http://127.0.0.1:3037}"
+token="${BRIDGE_TOKEN:-}"
 session_id=""
 project=""
 tmux_id=""
+lifecycle_id=""
 force=0
 dry_run=0
 
 usage() {
   cat <<'USAGE'
 사용법:
-  omx-kill --session SESSION_ID [--force]
-  omx-kill --project PROJECT [--force]
-  omx-kill --tmux TMUX_SESSION [--force]
+  codex-kill --session SESSION_ID [--force]
+  codex-kill --project PROJECT [--force]
+  codex-kill --tmux TMUX_SESSION [--force]
 
 설명:
   bridge session이 가리키는 tmux session을 안전하게 종료합니다.
@@ -28,6 +29,34 @@ ok() { printf '✅ %s\n' "$*" >&2; }
 die() { printf '❌ %s\n' "$*" >&2; exit 1; }
 trap 'rc=$?; printf "❌ 실패: line=%s exit=%s\n" "$LINENO" "$rc" >&2; exit "$rc"' ERR
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "필요한 명령어를 찾을 수 없습니다: $1"; }
+
+append_lifecycle_end() {
+  local session="$1" tmux="$2"
+  SESSION_ID="$session" TMUX_ID="$tmux" node --input-type=module <<'NODE'
+import { appendFile, mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+const expandHome = (value) => {
+  const raw = String(value || '');
+  if (raw === '~') return homedir();
+  if (raw.startsWith('~/')) return join(homedir(), raw.slice(2));
+  return raw;
+};
+const root = expandHome(process.env.BRIDGE_STATE_ROOT || join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'hermes-codex-bridge'));
+await mkdir(root, { recursive: true });
+const now = new Date().toISOString();
+await appendFile(join(root, 'session-history.jsonl'), `${JSON.stringify({
+  event: 'session_end',
+  session_id: process.env.SESSION_ID || process.env.TMUX_ID,
+  timestamp: now,
+  ended_at: now,
+  tmux_id: process.env.TMUX_ID || undefined,
+  lifecycle_owner: 'bridge',
+  reason: 'codex-kill',
+})}\n`, 'utf8');
+NODE
+}
+
 
 auth_args=()
 if [[ -n "$token" ]]; then auth_args=(-H "Authorization: Bearer $token"); fi
@@ -53,9 +82,13 @@ if [[ -z "$tmux_id" ]]; then
   require_cmd jq
   sessions_json="$(curl -fsS "${auth_args[@]}" "$bridge_url/sessions")"
   if [[ -n "$session_id" ]]; then
-    tmux_id="$(jq -r --arg id "$session_id" '.sessions[] | select(.bridgeSessionId==$id or .codexSessionId==$id or .omxSessionId==$id or .tmuxId==$id or .tmuxPaneId==$id) | .tmuxId // empty' <<<"$sessions_json" | head -n 1)"
+    match="$(jq -r --arg id "$session_id" '.sessions[] | select(.bridgeSessionId==$id or .codexSessionId==$id or .lifecycleSessionId==$id or .tmuxId==$id or .tmuxPaneId==$id) | [.tmuxId // "", .lifecycleSessionId // .bridgeSessionId // .codexSessionId // .tmuxId // ""] | @tsv' <<<"$sessions_json" | head -n 1)"
+    tmux_id="$(cut -f1 <<<"$match")"
+    lifecycle_id="$(cut -f2 <<<"$match")"
   elif [[ -n "$project" ]]; then
-    tmux_id="$(jq -r --arg project "$project" '[.sessions[] | select(.project==$project and .status!="ended" and (.tmuxId != null))] | sort_by(.lastEventAt // .startedAt // "") | reverse | .[0].tmuxId // empty' <<<"$sessions_json")"
+    match="$(jq -r --arg project "$project" '[.sessions[] | select(.project==$project and .status!="ended" and (.tmuxId != null))] | sort_by(.lastEventAt // .startedAt // "") | reverse | .[0] | [.tmuxId // "", .lifecycleSessionId // .bridgeSessionId // .codexSessionId // .tmuxId // ""] | @tsv' <<<"$sessions_json")"
+    tmux_id="$(cut -f1 <<<"$match")"
+    lifecycle_id="$(cut -f2 <<<"$match")"
   else
     die "--session, --project, 또는 --tmux가 필요합니다"
   fi
@@ -81,4 +114,5 @@ if [[ "$force" -ne 1 ]]; then
 fi
 
 tmux kill-session -t "$tmux_id"
+append_lifecycle_end "${lifecycle_id:-${session_id:-$tmux_id}}" "$tmux_id"
 ok "종료 완료: $tmux_id"

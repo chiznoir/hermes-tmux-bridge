@@ -53,7 +53,7 @@ export function discordThreadNameForSession(session = {}, options = {}) {
   if (configured) return configured.slice(0, 100);
   const id = cleanEnv(
     session.tmuxId
-    || session.omxSessionId
+    || session.lifecycleSessionId
     || session.bridgeSessionId
     || session.codexThreadId
     || session.codexSessionId

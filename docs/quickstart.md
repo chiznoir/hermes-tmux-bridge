@@ -1,4 +1,4 @@
-# Quick Start — Hermes OMX Bridge
+# Quick Start — Hermes Codex Bridge
 
 This guide is for a self-hosted environment that already has Hermes Gateway and a Discord bot. For the full agent runbook, start with [`INSTALL.md`](../INSTALL.md). For the Korean version, see [`docs/quickstart-ko.md`](quickstart-ko.md).
 
@@ -7,10 +7,10 @@ For a bridge + Hermes/Discord-only agent runbook, see [`docs/bridge-hermes-only-
 ## 0. Recommended shape
 
 ```text
-omx / Codex / tmux
-  -> hermes-omx-bridge
+codex / Codex / tmux
+  -> hermes-codex-bridge
      -> Hermes Gateway webhook sink
-  -> Hermes subscription `omx-bridge` + hermes-omx-bridge skill
+  -> Hermes subscription `codex-bridge` + hermes-codex-bridge skill
   -> Discord project channel
 ```
 
@@ -21,7 +21,7 @@ Criteria:
 - Node.js **20+** / npm: bridge server, tests, and package scripts.
 - `tmux`: visible session creation/termination and tmux-backed dispatch.
 - `curl`: health checks and bridge HTTP calls.
-- `jq`: required by helper CLIs such as `omx-send` / `omx-kill` when they read bridge JSON or build JSON payloads.
+- `jq`: required by helper CLIs such as `codex-send` / `codex-kill` when they read bridge JSON or build JSON payloads.
 - Hermes Gateway: required for webhook/Discord push delivery in this quick start.
 
 ```bash
@@ -36,34 +36,34 @@ systemctl --user status hermes-gateway.service
 ## 2. Recommended one-command install
 
 ```bash
-git clone https://github.com/chiznoir/hermes-omx-bridge.git
-cd hermes-omx-bridge
+git clone https://github.com/chiznoir/hermes-codex-bridge.git
+cd hermes-codex-bridge
 npm test
 scripts/install-hermes-stack.sh \
   --webhook \
   --non-interactive \
   --channel <fallback-discord-channel-id> \
-  --project hermes-omx-bridge=<project-discord-channel-id> \
+  --project hermes-codex-bridge=<project-discord-channel-id> \
   --restart
 ```
 
-Replace channel IDs with real Discord IDs. This command also installs `bin/omx-new`, `bin/omx-send`, and `bin/omx-kill` onto `PATH`. Without `--webhook`, the install is an agent bridge-only mode: Hermes can query the bridge API, but automatic push notifications will not be sent.
+Replace channel IDs with real Discord IDs. This command also installs `bin/codex-new`, `bin/codex-send`, and `bin/codex-kill` onto `PATH`. Without `--webhook`, the install is an agent bridge-only mode: Hermes can query the bridge API, but automatic push notifications will not be sent.
 
 If you need to split the install manually, use [`docs/install.md`](install.md) or sections 3–4 below.
 
 Validate:
 
 ```bash
-systemctl --user status hermes-omx-bridge.service
+systemctl --user status hermes-codex-bridge.service
 curl -sS http://127.0.0.1:3037/health
 curl -sS http://127.0.0.1:3037/sessions
-command -v omx-new omx-send omx-kill
+command -v codex-new codex-send codex-kill
 ```
 
 ## 3. Manual helper CLI and Hermes skill install
 
 ```bash
-scripts/install-omx-cli.sh --force
+scripts/install-codex-cli.sh --force
 scripts/install-hermes-skill.sh
 systemctl --user restart hermes-gateway.service
 ```
@@ -71,7 +71,7 @@ systemctl --user restart hermes-gateway.service
 Skill target:
 
 ```text
-~/.hermes/skills/autonomous-ai-agents/hermes-omx-bridge/SKILL.md
+~/.hermes/skills/autonomous-ai-agents/hermes-codex-bridge/SKILL.md
 ```
 
 ## 4. Manual Hermes webhook sink connection
@@ -79,15 +79,15 @@ Skill target:
 Do this only when you are not using the one-command installer. Prepare a secret and project channel map.
 
 ```bash
-mkdir -p ~/.config/hermes-omx-bridge
-openssl rand -hex 32 > ~/.config/hermes-omx-bridge/hermes-webhook.secret
-chmod 600 ~/.config/hermes-omx-bridge/hermes-webhook.secret
+mkdir -p ~/.config/hermes-codex-bridge
+openssl rand -hex 32 > ~/.config/hermes-codex-bridge/hermes-webhook.secret
+chmod 600 ~/.config/hermes-codex-bridge/hermes-webhook.secret
 ```
 
 Example channel map:
 
 ```bash
-cat > ~/.config/hermes-omx-bridge/project-channels.json <<'JSON'
+cat > ~/.config/hermes-codex-bridge/project-channels.json <<'JSON'
 {
   "default": "<fallback-discord-channel-id>",
   "projects": {
@@ -95,17 +95,17 @@ cat > ~/.config/hermes-omx-bridge/project-channels.json <<'JSON'
   }
 }
 JSON
-chmod 600 ~/.config/hermes-omx-bridge/project-channels.json
+chmod 600 ~/.config/hermes-codex-bridge/project-channels.json
 ```
 
 Enable the Hermes sink in bridge env:
 
 ```env
 BRIDGE_HERMES_WEBHOOK_ENABLED=true
-BRIDGE_HERMES_WEBHOOK_URL=http://127.0.0.1:8644/webhooks/omx-bridge
+BRIDGE_HERMES_WEBHOOK_URL=http://127.0.0.1:8644/webhooks/codex-bridge
 BRIDGE_HERMES_WEBHOOK_SECRET=<same secret>
 BRIDGE_HERMES_DEFAULT_CHANNEL_ID=<fallback-discord-channel-id>
-BRIDGE_HERMES_PROJECT_CHANNEL_MAP=~/.config/hermes-omx-bridge/project-channels.json
+BRIDGE_HERMES_PROJECT_CHANNEL_MAP=~/.config/hermes-codex-bridge/project-channels.json
 BRIDGE_HERMES_CONFIG=~/.hermes/config.yaml
 BRIDGE_HERMES_ALLOWLIST=true
 BRIDGE_HERMES_RESTART=true
@@ -128,13 +128,13 @@ The Hermes webhook subscription uses the `subscription_prompt` generated by `scr
 scripts/install-hermes-stack.sh --webhook --restart --non-interactive
 ```
 
-If a manual `hermes webhook subscribe` is required, use the current `subscription_prompt` content from `scripts/install-hermes-stack.sh`; do not create a stale prompt copy. The current subscription loads `hermes-omx-bridge,omx-new,omx-send,omx-kill` together. It covers `CommandSubmitted` / `User Command` raw notifications, default `direct` FinalAnswer fullText, optional `summary`, long `FinalAnswer` chunking with the title only on the first chunk and `(i/N)` on every chunk, bridge-owned direct chunk delivery, the “raw/original text” exception, Discord-originated dispatch through `omx-send --discord-approval` plus Hermes `clarify` approval cards, and intent boundaries that route creation/dispatch/termination to `omx-new`, `omx-send`, and `omx-kill`. `--discord-approval` only creates bridge pending state; Hermes must call `clarify` / AskUserQuestion to render actual Discord send/reject/modify buttons. `skills/omx-send/SKILL.md` owns prompt refinement SSoT for routing metadata vs payload instruction separation and meaning-preserving executable instruction refinement. `/new` and `/resume` are Codex slash commands when sent into an existing OMX/Codex pane, not Hermes/Gateway routing commands.
+If a manual `hermes webhook subscribe` is required, use the current `subscription_prompt` content from `scripts/install-hermes-stack.sh`; do not create a stale prompt copy. The current subscription loads `hermes-codex-bridge,codex-new,codex-send,codex-kill` together. It covers `CommandSubmitted` / `User Command` raw notifications, default `direct` FinalAnswer fullText, optional `summary`, long `FinalAnswer` chunking with the title only on the first chunk and `(i/N)` on every chunk, bridge-owned direct chunk delivery, the “raw/original text” exception, Discord-originated dispatch through `codex-send --discord-approval` plus Hermes `clarify` approval cards, and intent boundaries that route creation/dispatch/termination to `codex-new`, `codex-send`, and `codex-kill`. `--discord-approval` only creates bridge pending state; Hermes must call `clarify` / AskUserQuestion to render actual Discord send/reject/modify buttons. `skills/codex-send/SKILL.md` owns prompt refinement SSoT for routing metadata vs payload instruction separation and meaning-preserving executable instruction refinement. `/new` and `/resume` are Codex slash commands when sent into an existing Codex pane, not Hermes/Gateway routing commands.
 
 Restart services:
 
 ```bash
 systemctl --user restart hermes-gateway.service
-systemctl --user restart hermes-omx-bridge.service
+systemctl --user restart hermes-codex-bridge.service
 ```
 
 Validate:
@@ -160,7 +160,7 @@ Examples:
 Then ask Hermes:
 
 ```text
-Start a new session for project-a with omx-new and watch it.
+Start a new session for project-a with codex-new and watch it.
 I already created the project text channel #project-a, so find it, register the bridge mapping, and send later notifications there.
 ```
 
@@ -184,14 +184,14 @@ Default notification mode is `direct`: the bridge uses the latest FinalAnswer fu
 Start a new project session:
 
 ```text
-Start the current project with omx-new and watch it.
+Start the current project with codex-new and watch it.
 If a project-name text channel exists, register the mapping; otherwise try bridge auto-create/mapping and send later notifications there.
 ```
 
 Check existing sessions:
 
 ```text
-Use hermes-omx-bridge to check bridge health and sessions.
+Use hermes-codex-bridge to check bridge health and sessions.
 ```
 
 Send a follow-up to a specific session:
@@ -203,7 +203,7 @@ Tell the most recent project session to run tests and fix failures.
 Send into a team/tmux visible session:
 
 ```text
-For that omx team session, use tmux visible mode and send: check worker state and proceed to the next step.
+For that codex team session, use tmux visible mode and send: check worker state and proceed to the next step.
 ```
 
 ## 6. Smoke check
@@ -230,7 +230,7 @@ curl -sS -X POST "http://127.0.0.1:3037/sessions/$SESSION_ID/question-answers" \
 Success criteria:
 
 - bridge health is `{ "ok": true }`.
-- session list contains the expected OMX/Codex/tmux session.
+- session list contains the expected Codex/tmux session.
 - dry-run command is recorded but not injected.
 - question answer is queued and visible through bridge question endpoints.
 - Discord receives configured lifecycle/command/final-answer notifications in the expected project channel or session thread.

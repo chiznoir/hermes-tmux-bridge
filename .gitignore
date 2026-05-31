@@ -6,6 +6,4 @@
 # Local agent/runtime workspaces
 AGENTS.md
 .codex/
-.clawhip/
-.omx/
-omx_wiki/
+codex_wiki/

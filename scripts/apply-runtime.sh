@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Apply the checked-out hermes-omx-bridge repo to the local runtime service.
+Apply the checked-out hermes-codex-bridge repo to the local runtime service.
 
 This is the repeatable "after code update" step: reload systemd units, restart
 the bridge service, and wait for /health to return ok.
@@ -14,7 +14,7 @@ Usage:
 Options:
   --user                  Restart the per-user systemd service (default)
   --system                Restart the system service
-  --name NAME             Service name (default: hermes-omx-bridge)
+  --name NAME             Service name (default: hermes-codex-bridge)
   --host HOST             Health check host (default: 127.0.0.1)
   --port PORT             Health check port (default: PORT env or 3037)
   --health-url URL        Full health URL (default: http://HOST:PORT/health)
@@ -28,12 +28,12 @@ Options:
 Examples:
   scripts/apply-runtime.sh
   npm run apply:runtime
-  scripts/apply-runtime.sh --system --name hermes-omx-bridge --port 3037
+  scripts/apply-runtime.sh --system --name hermes-codex-bridge --port 3037
 USAGE
 }
 
 scope="user"
-name="${BRIDGE_SERVICE_NAME:-hermes-omx-bridge}"
+name="${BRIDGE_SERVICE_NAME:-hermes-codex-bridge}"
 host="${HOST:-127.0.0.1}"
 port="${PORT:-3037}"
 health_url=""

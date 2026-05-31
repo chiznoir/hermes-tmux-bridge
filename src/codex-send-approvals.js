@@ -4,8 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { bridgeStatePath } from './bridge-paths.js';
 import { ensureDirFor, readJsonl } from './jsonl.js';
 
-export const OMX_SEND_APPROVAL_GATE = 'discord-hermes-omx-send';
-export const OMX_SEND_APPROVAL_KIND = 'omx-send-approval';
+export const CODEX_SEND_APPROVAL_GATE = 'discord-hermes-codex-send';
+export const CODEX_SEND_APPROVAL_KIND = 'codex-send-approval';
 
 const SEND_VALUE = 'send';
 const REJECT_VALUE = 'reject';
@@ -25,23 +25,24 @@ function cloneObject(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-export function approvalDecisionsLogPath(projectRoot = process.cwd(), options = {}) {
-  return process.env.BRIDGE_OMX_SEND_APPROVALS_PATH
+export function approvalDecisionsLogPath(_projectRoot = process.cwd(), options = {}) {
+  const projectRoot = _projectRoot;
+  return process.env.BRIDGE_CODEX_SEND_APPROVALS_PATH
     || (process.env.BRIDGE_STATE_ROOT || options.bridgeStateRoot
-      ? bridgeStatePath('bridge-omx-send-approvals.jsonl', options)
-      : join(projectRoot, '.omx', 'state', 'bridge-omx-send-approvals.jsonl'));
+      ? bridgeStatePath('bridge-codex-send-approvals.jsonl', options)
+      : join(projectRoot, '.codex', 'state', 'bridge-codex-send-approvals.jsonl'));
 }
 
 export function approvalGateFromBody(body = {}) {
   const gate = cleanString(body.approvalGate || body.approval_gate);
   if (!gate) return { ok: true, enabled: false, gate: null };
-  if (gate !== OMX_SEND_APPROVAL_GATE) {
+  if (gate !== CODEX_SEND_APPROVAL_GATE) {
     return { ok: false, status: 400, error: `unsupported approvalGate: ${gate}` };
   }
   return { ok: true, enabled: true, gate };
 }
 
-export function buildOmxSendApprovalActions(questionId, answerEndpoint = null) {
+export function buildCodexSendApprovalActions(questionId, answerEndpoint = null) {
   const withEndpoint = (action) => ({
     ...action,
     ...(answerEndpoint ? {
@@ -54,25 +55,25 @@ export function buildOmxSendApprovalActions(questionId, answerEndpoint = null) {
       action: 'send',
       label: '전송',
       style: 'primary',
-      custom_id: `omx-send-approval:${questionId}:send`,
+      custom_id: `codex-send-approval:${questionId}:send`,
       answer: { kind: 'option', value: SEND_VALUE, selected_values: [SEND_VALUE], selected_labels: ['전송'] },
     }),
     withEndpoint({
       action: 'reject',
       label: '거절',
       style: 'danger',
-      custom_id: `omx-send-approval:${questionId}:reject`,
+      custom_id: `codex-send-approval:${questionId}:reject`,
       answer: { kind: 'option', value: REJECT_VALUE, selected_values: [REJECT_VALUE], selected_labels: ['거절'] },
     }),
     withEndpoint({
       action: 'modify',
       label: '추가수정',
       style: 'secondary',
-      custom_id: `omx-send-approval:${questionId}:modify`,
+      custom_id: `codex-send-approval:${questionId}:modify`,
       answer: { kind: 'other', selected_values: [MODIFY_VALUE] },
       modal: {
         title: '프롬프트 추가수정',
-        custom_id: `omx-send-approval:${questionId}:modify-modal`,
+        custom_id: `codex-send-approval:${questionId}:modify-modal`,
         field: { name: 'other_text', label: '수정 요청 또는 추가 지시' },
       },
     }),
@@ -82,7 +83,7 @@ export function buildOmxSendApprovalActions(questionId, answerEndpoint = null) {
 export function buildDiscordComponents(questionId) {
   return [{
     type: 1,
-    components: buildOmxSendApprovalActions(questionId).map((action) => ({
+    components: buildCodexSendApprovalActions(questionId).map((action) => ({
       type: 2,
       style: action.action === 'send' ? 1 : (action.action === 'reject' ? 4 : 2),
       label: action.label,
@@ -91,35 +92,35 @@ export function buildDiscordComponents(questionId) {
   }];
 }
 
-export function buildApprovalQuestionBody({ session, commandText, commandMetadata, commandBody, gate = OMX_SEND_APPROVAL_GATE }) {
-  const questionId = `omx-send-approval-${randomUUID()}`;
+export function buildApprovalQuestionBody({ session, commandText, commandMetadata, commandBody, gate = CODEX_SEND_APPROVAL_GATE }) {
+  const questionId = `codex-send-approval-${randomUUID()}`;
   return {
     questionId,
-    kind: OMX_SEND_APPROVAL_KIND,
+    kind: CODEX_SEND_APPROVAL_KIND,
     question: `정제된 프롬프트를 Hermes에서 전송할까요?\n\n${commandText}`,
     type: 'single-answerable',
     allow_other: true,
     other_label: '추가수정',
-    source: 'bridge-omx-send-approval',
+    source: 'bridge-codex-send-approval',
     options: [
       { label: '전송', value: SEND_VALUE, description: '정제된 프롬프트를 현재 세션으로 전송합니다.' },
       { label: '거절', value: REJECT_VALUE, description: '전송하지 않고 요청을 닫습니다.' },
     ],
     metadata: compactObject({
       gate,
-      kind: OMX_SEND_APPROVAL_KIND,
+      kind: CODEX_SEND_APPROVAL_KIND,
       commandText,
       commandMetadata: cloneObject(commandMetadata),
       commandBody: cloneObject(commandBody),
       bridgeSessionId: session.bridgeSessionId || null,
       codexThreadId: session.codexThreadId || null,
-      omxSessionId: session.omxSessionId || null,
+      lifecycleSessionId: session.lifecycleSessionId || null,
     }),
   };
 }
 
 export function approvalResponseFromQuestion(record, promptNormalization = {}) {
-  const actions = buildOmxSendApprovalActions(record.questionId, record.answerEndpoint);
+  const actions = buildCodexSendApprovalActions(record.questionId, record.answerEndpoint);
   return {
     question: record,
     answer_endpoint: record.answerEndpoint,
@@ -129,7 +130,7 @@ export function approvalResponseFromQuestion(record, promptNormalization = {}) {
     delivery: {
       ok: true,
       status: 'approval-pending',
-      backend: 'bridge-omx-send-approval',
+      backend: 'bridge-codex-send-approval',
     },
     promptNormalization,
   };
@@ -151,9 +152,9 @@ export async function readApprovalDecisions(session = {}, questionId, options = 
   const records = await readJsonl(approvalDecisionsLogPath(options.projectRoot, options));
   return records.filter((record) => {
     if (questionId && record.questionId !== questionId) return false;
-    const ids = [session.bridgeSessionId, session.codexThreadId, session.codexSessionId, session.omxSessionId].filter(Boolean);
+    const ids = [session.bridgeSessionId, session.codexThreadId, session.codexSessionId, session.lifecycleSessionId].filter(Boolean);
     if (ids.length === 0) return true;
-    return [record.sessionId, record.bridgeSessionId, record.codexThreadId, record.omxSessionId].filter(Boolean).some((id) => ids.includes(id));
+    return [record.sessionId, record.bridgeSessionId, record.codexThreadId, record.lifecycleSessionId].filter(Boolean).some((id) => ids.includes(id));
   });
 }
 
@@ -176,7 +177,7 @@ export function approvalMarkerBase({ session, question, questionAnswer, body }) 
     sessionId: session.bridgeSessionId || session.codexThreadId || null,
     bridgeSessionId: session.bridgeSessionId || null,
     codexThreadId: session.codexThreadId || null,
-    omxSessionId: session.omxSessionId || null,
+    lifecycleSessionId: session.lifecycleSessionId || null,
     questionId: question.questionId,
     questionAnswerId: questionAnswer.questionAnswerId,
     discordInteractionId: questionAnswer.discordInteractionId || body.discordInteractionId || body.discord_interaction_id || null,

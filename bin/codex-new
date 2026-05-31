@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$PWD"
+session_name=""
+attach=0
+print_json=0
+bridge_check=1
+extra_args=()
+
+usage() {
+  cat <<'USAGE'
+사용법:
+  codex-new [PROJECT_DIR] [--name SESSION] [--attach] [--json] [--no-check] [-- CODEX_ARGS...]
+
+설명:
+  새 Codex TUI를 tmux session 안에서 시작하고 bridge-owned lifecycle을 기록합니다.
+  기본 실행은 순정 Codex CLI + tmux입니다.
+  CODEX_EFFORT가 설정되면 `-c model_reasoning_effort="<value>"`를 Codex에 전달합니다.
+  예: CODEX_EFFORT=high, CODEX_EFFORT=xhigh, CODEX_EFFORT=medium
+
+예시:
+  codex-new ~/work/hermes-codex-bridge
+  CODEX_EFFORT=high codex-new . --name codex-bridge-main --attach
+  codex-new ~/work/app -- --sandbox workspace-write
+USAGE
+}
+
+log() { printf '  • %s\n' "$*" >&2; }
+ok() { printf '✅ %s\n' "$*" >&2; }
+die() { printf '❌ %s\n' "$*" >&2; exit 1; }
+trap 'rc=$?; printf "❌ 실패: line=%s exit=%s\n" "$LINENO" "$rc" >&2; exit "$rc"' ERR
+require_cmd() { command -v "$1" >/dev/null 2>&1 || die "필요한 명령어를 찾을 수 없습니다: $1"; }
+
+slugify() {
+  local raw="$1" slug
+  slug="$(printf '%s' "$raw" | tr -cs '[:alnum:]_.-' '-' | sed 's/^-*//; s/-*$//')"
+  printf '%s' "${slug:-project}"
+}
+
+auto_name() {
+  printf 'codex-%s-%s' "$(slugify "$(basename "$project_dir")")" "$(date +%H%M%S)"
+}
+
+quote_cmd() {
+  local out=() arg
+  for arg in "$@"; do out+=("$(printf '%q' "$arg")"); done
+  printf '%s ' "${out[@]}"
+}
+
+append_lifecycle() {
+  local event="$1" session="$2" cwd="$3" tmux="$4" pane="$5" pid="$6" command_text="$7"
+  EVENT="$event" SESSION_ID="$session" CWD_VALUE="$cwd" TMUX_ID="$tmux" PANE_ID="$pane" PANE_PID="$pid" COMMAND_TEXT="$command_text" node --input-type=module <<'NODE'
+import { appendFile, mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+const expandHome = (value) => {
+  const raw = String(value || '');
+  if (raw === '~') return homedir();
+  if (raw.startsWith('~/')) return join(homedir(), raw.slice(2));
+  return raw;
+};
+const root = expandHome(process.env.BRIDGE_STATE_ROOT || join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'hermes-codex-bridge'));
+await mkdir(root, { recursive: true });
+const now = new Date().toISOString();
+const record = {
+  event: process.env.EVENT,
+  session_id: process.env.SESSION_ID,
+  timestamp: now,
+  cwd: process.env.CWD_VALUE,
+  tmux_id: process.env.TMUX_ID,
+  tmux_pane_id: process.env.PANE_ID,
+  pid: Number.parseInt(process.env.PANE_PID || '', 10) || undefined,
+  command: process.env.COMMAND_TEXT || undefined,
+  lifecycle_owner: 'bridge',
+};
+if (record.event === 'session_start') record.started_at = now;
+if (record.event === 'session_end') record.ended_at = now;
+await appendFile(join(root, 'session-history.jsonl'), `${JSON.stringify(record)}\n`, 'utf8');
+NODE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --name|-n) [[ $# -ge 2 ]] || die "--name 뒤에 세션명이 필요합니다"; session_name="$2"; shift 2 ;;
+    --attach|-a) attach=1; shift ;;
+    --json) print_json=1; shift ;;
+    --no-check|--no-bridge-check) bridge_check=0; shift ;;
+    --) shift; extra_args=("$@"); break ;;
+    -*) die "알 수 없는 옵션: $1" ;;
+    *) project_dir="$1"; shift ;;
+  esac
+done
+
+require_cmd codex
+require_cmd tmux
+
+project_dir="$(cd "$project_dir" && pwd)"
+session_name="${session_name:-$(auto_name)}"
+[[ "$session_name" =~ ^[[:alnum:]_.-]+$ ]] || die "유효하지 않은 tmux session 이름: $session_name"
+
+if tmux has-session -t "$session_name" 2>/dev/null; then
+  die "이미 존재하는 tmux session입니다: $session_name"
+fi
+
+cmd=(codex --dangerously-bypass-approvals-and-sandbox)
+if [[ -n "${CODEX_EFFORT:-}" ]]; then
+  cmd+=(-c "model_reasoning_effort=\"${CODEX_EFFORT}\"")
+fi
+if [[ ${#extra_args[@]} -gt 0 ]]; then cmd+=("${extra_args[@]}"); fi
+
+cmd_text="exec $(quote_cmd "${cmd[@]}")"
+tmux new-session -d -s "$session_name" -c "$project_dir" "$cmd_text"
+
+sleep 1
+pane_id="$(tmux list-panes -t "$session_name" -F '#{pane_id}' | head -n 1)"
+pane_pid="$(tmux list-panes -t "$session_name" -F '#{pane_pid}' | head -n 1)"
+append_lifecycle session_start "$session_name" "$project_dir" "$session_name" "$pane_id" "$pane_pid" "${cmd[*]}"
+
+if [[ "$bridge_check" -eq 1 ]]; then
+  bridge_url="${BRIDGE_URL:-http://127.0.0.1:3037}"
+  if command -v curl >/dev/null 2>&1; then curl -fsS --max-time 2 "$bridge_url/health" >/dev/null 2>&1 || true; fi
+fi
+
+if [[ "$print_json" -eq 1 ]]; then
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --arg session "$session_name" --arg pane "$pane_id" --arg dir "$project_dir" --arg command "${cmd[*]}" \
+      '{ok:true, lifecycleSessionId:$session, tmuxId:$session, tmuxPaneId:$pane, projectDir:$dir, command:$command}'
+  else
+    printf '{"ok":true,"lifecycleSessionId":"%s","tmuxId":"%s","tmuxPaneId":"%s","projectDir":"%s"}\n' "$session_name" "$session_name" "$pane_id" "$project_dir"
+  fi
+else
+  ok "시작 완료: $session_name ($pane_id)"
+  log "프로젝트: $project_dir"
+  log "실행 명령: ${cmd[*]}"
+  log "bridge endpoint: ${BRIDGE_URL:-http://127.0.0.1:3037}/sessions"
+fi
+
+if [[ "$attach" -eq 1 ]]; then
+  if [[ -n "${TMUX:-}" ]]; then exec tmux switch-client -t "$session_name"; else exec tmux attach-session -t "$session_name"; fi
+fi

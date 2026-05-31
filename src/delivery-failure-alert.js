@@ -1,7 +1,7 @@
 const DEFAULT_DISCORD_SAFE_MESSAGE_CHARS = 1800;
 
 export function sessionDisplayId(session = {}) {
-  return session.omxSessionId || session.bridgeSessionId || session.codexSessionId || session.threadId || 'unknown-session';
+  return session.lifecycleSessionId || session.bridgeSessionId || session.codexSessionId || session.threadId || 'unknown-session';
 }
 
 export function deliveryFailureAlertMessage(session = {}, event = {}, reason = 'unknown', options = {}) {

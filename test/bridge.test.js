@@ -4,14 +4,14 @@ import { chmod, mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createCommandNotificationFlusher, createServer, resolveRuntimeProjectRoot } from '../src/server.js';
-import { appendApprovalDecision } from '../src/omx-send-approvals.js';
+import { appendApprovalDecision } from '../src/codex-send-approvals.js';
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'omx-bridge-'));
+  const root = await mkdtemp(join(tmpdir(), 'codex-bridge-'));
   const codexHome = join(root, 'codex-home');
   const sessionsDir = join(codexHome, 'sessions', '2026', '04', '28');
   await mkdir(sessionsDir, { recursive: true });
-  await mkdir(join(root, '.omx', 'logs'), { recursive: true });
+  await mkdir(join(root, '.codex', 'logs'), { recursive: true });
   const codexSessionId = '019dd410-662d-73c1-9a72-5a602d14bd3e';
   const logPath = join(sessionsDir, `rollout-2026-04-28T12-28-57-${codexSessionId}.jsonl`);
   const lines = [
@@ -25,30 +25,30 @@ async function fixture() {
     { timestamp: '2026-04-28T12:29:11.000Z', type: 'event_msg', payload: { type: 'task_complete', last_agent_message: '현재 상태는 정상입니다. '.repeat(100), duration_ms: 1234 } },
   ];
   await writeFile(logPath, lines.map((line) => JSON.stringify(line)).join('\n'));
-  await writeFile(join(root, '.omx', 'logs', 'session-history.jsonl'), JSON.stringify({
-    session_id: 'omx-1777379336693-sjhnhr',
+  await writeFile(join(root, '.codex', 'logs', 'session-history.jsonl'), JSON.stringify({
+    session_id: 'codex-1777379336693-sjhnhr',
     native_session_id: codexSessionId,
     started_at: '2026-04-28T12:28:56.761Z',
     cwd: root,
     pid: 123,
   }) + '\n');
 
-  await writeFile(join(root, '.omx', 'logs', 'omx-2026-04-28.jsonl'), JSON.stringify({
+  await writeFile(join(root, '.codex', 'logs', 'codex-2026-04-28.jsonl'), JSON.stringify({
     event: 'session_start',
     timestamp: '2026-04-28T12:28:56.761Z',
-    session_id: 'omx-1777379336693-sjhnhr',
+    session_id: 'codex-1777379336693-sjhnhr',
     native_session_id: codexSessionId,
     cwd: root,
     pid: 123,
   }) + '\n');
 
-  await writeFile(join(root, '.omx', 'logs', 'tmux-hook-2026-04-28.jsonl'), JSON.stringify({
+  await writeFile(join(root, '.codex', 'logs', 'tmux-hook-2026-04-28.jsonl'), JSON.stringify({
     timestamp: '2026-04-28T12:29:05.000Z',
     thread_id: codexSessionId,
     target: { type: 'pane', value: '%77' },
   }) + '\n');
 
-  const fakeTmuxCallsPath = join(root, '.omx', 'logs', 'fake-tmux-calls.log');
+  const fakeTmuxCallsPath = join(root, '.codex', 'logs', 'fake-tmux-calls.log');
   const fakeTmuxBin = join(root, 'fake-tmux.sh');
   await writeFile(fakeTmuxBin, `#!/bin/sh
 ROOT_PATH=${JSON.stringify(root)}
@@ -105,13 +105,13 @@ async function request(server, path, options = {}) {
 }
 
 async function readBridgeAudit(root) {
-  const path = join(root, '.omx', 'logs', 'bridge-interactions.jsonl');
+  const path = join(root, '.codex', 'logs', 'bridge-interactions.jsonl');
   const content = await readFile(path, 'utf8').catch(() => '');
   return content.trim() ? content.trim().split('\n').map((line) => JSON.parse(line)) : [];
 }
 
 async function readBridgeAuditLog(root) {
-  const path = join(root, '.omx', 'logs', 'bridge-audit.jsonl');
+  const path = join(root, '.codex', 'logs', 'bridge-audit.jsonl');
   const content = await readFile(path, 'utf8').catch(() => '');
   return content.trim() ? content.trim().split('\n').map((line) => JSON.parse(line)) : [];
 }
@@ -154,7 +154,7 @@ test('Bearer auth protects bridge APIs while leaving health public', async () =>
   assert.ok(Array.isArray(allowed.json.sessions));
 });
 
-test('GET /sessions returns mapped Codex/OMX session fields', async () => {
+test('GET /sessions returns mapped Codex session fields', async () => {
   const { root, codexHome, codexSessionId } = await fixture();
   const server = createServer({ projectRoot: root, codexHome });
   const res = await request(server, '/sessions');
@@ -170,10 +170,10 @@ test('GET /sessions returns mapped Codex/OMX session fields', async () => {
 
 test('GET /sessions hides Codex-only sessions by default and exposes them on explicit opt-in', async () => {
   const { root, codexHome, codexSessionId } = await fixture();
-  const omxLogPath = join(root, '.omx', 'logs', 'omx-2026-04-28.jsonl');
-  const existingLog = await readFile(omxLogPath, 'utf8');
+  const codexLogPath = join(root, '.codex', 'logs', 'codex-2026-04-28.jsonl');
+  const existingLog = await readFile(codexLogPath, 'utf8');
   const nativeOnlySessionId = 'codex-native-exec-only';
-  await writeFile(omxLogPath, [
+  await writeFile(codexLogPath, [
     existingLog.trim(),
     JSON.stringify({
       event: 'session_start',
@@ -194,20 +194,20 @@ test('GET /sessions hides Codex-only sessions by default and exposes them on exp
   assert.equal(debugRes.status, 200);
   assert.equal(debugRes.json.meta.includeCodexOnlySessions, true);
   assert.equal(
-    debugRes.json.sessions.find((session) => session.codexSessionId === nativeOnlySessionId)?.hasOmxLifecycle,
+    debugRes.json.sessions.find((session) => session.codexSessionId === nativeOnlySessionId)?.hasBridgeLifecycle,
     false,
   );
 });
 
-test('GET /sessions resolves omx ids and maps tmux hook targets when tmux is available', async () => {
+test('GET /sessions resolves codex ids and maps tmux hook targets when tmux is available', async () => {
   const { root, codexHome, codexSessionId, fakeTmuxBin } = await fixture();
   await withEnv({ TMUX_BIN: fakeTmuxBin }, async () => {
     const server = createServer({ projectRoot: root, codexHome });
-    const res = await request(server, '/sessions/omx-1777379336693-sjhnhr');
+    const res = await request(server, '/sessions/codex-1777379336693-sjhnhr');
 
     assert.equal(res.status, 200);
     assert.equal(res.json.codexSessionId, codexSessionId);
-    assert.equal(res.json.omxSessionId, 'omx-1777379336693-sjhnhr');
+    assert.equal(res.json.lifecycleSessionId, 'codex-1777379336693-sjhnhr');
     assert.equal(res.json.tmuxId, 'bridge-test');
     assert.equal(res.json.tmuxPaneId, '%77');
     assert.equal(res.json.status, 'active');
@@ -301,7 +301,7 @@ test('GET /sessions/:id/events strips hook prompt internals from user command no
   const { root, codexHome, codexSessionId, logPath } = await fixture();
   const hookPromptWithCommand = [
     '<hook_prompt hook_run_id="stop:9:/home/user/.codex/hooks.json">',
-    'OMX Ralph is still active; continue the task and gather fresh verification evidence before stopping.',
+    'Codex Ralph is still active; continue the task and gather fresh verification evidence before stopping.',
     '</hook_prompt>',
     '실제 사용자가 보낸 요청만 남겨줘',
   ].join('\n');
@@ -317,14 +317,14 @@ test('GET /sessions/:id/events strips hook prompt internals from user command no
 
   assert.ok(commandEvent);
   assert.equal(commandEvent.text, '실제 사용자가 보낸 요청만 남겨줘');
-  assert.doesNotMatch(commandEvent.text, /hook_prompt|hook_run_id|OMX Ralph is still active/);
+  assert.doesNotMatch(commandEvent.text, /hook_prompt|hook_run_id|Codex Ralph is still active/);
 });
 
 test('GET /sessions/:id/events suppresses standalone hook prompt user command notifications', async () => {
   const { root, codexHome, codexSessionId, logPath } = await fixture();
   const hookPromptOnly = [
     '<hook_prompt hook_run_id="stop:9:/home/user/.codex/hooks.json">',
-    'OMX Ralph is still active; continue the task and gather fresh verification evidence before stopping.',
+    'Codex Ralph is still active; continue the task and gather fresh verification evidence before stopping.',
     '</hook_prompt>',
   ].join('\n');
   await writeFile(logPath, `\n${JSON.stringify({
@@ -336,7 +336,7 @@ test('GET /sessions/:id/events suppresses standalone hook prompt user command no
   const server = createServer({ projectRoot: root, codexHome });
   const events = await request(server, `/sessions/${codexSessionId}/events`);
 
-  assert.equal(events.json.events.some((event) => event.type === 'CommandSubmitted' && /hook_prompt|OMX Ralph is still active/.test(event.text)), false);
+  assert.equal(events.json.events.some((event) => event.type === 'CommandSubmitted' && /hook_prompt|Codex Ralph is still active/.test(event.text)), false);
 });
 
 test('GET /sessions/:id/events strips synthetic context from user command notifications', async () => {
@@ -399,10 +399,10 @@ test('GET /sessions/:id/events suppresses standalone synthetic user command noti
   assert.equal(events.json.events.some((event) => event.type === 'CommandSubmitted' && /SKILL\.md|turn_aborted|subagent_notification/.test(event.text)), false);
 });
 
-test('GET /sessions/:id/events suppresses standalone OMX Explore harness prompts', async () => {
+test('GET /sessions/:id/events suppresses standalone Codex Explore harness prompts', async () => {
   const { root, codexHome, codexSessionId, logPath } = await fixture();
   const exploreHarnessPrompt = [
-    'You are OMX Explore, a low-cost read-only repository exploration harness.',
+    'You are Codex Explore, a low-cost read-only repository exploration harness.',
     'Operate strictly in read-only mode. You may use repository-inspection shell commands only.',
     'Preferred commands: rg, grep, and tightly bounded read-only bash wrappers over rg/grep/ls/find/wc/cat/head/tail.',
     'Do not write, delete, rename, or modify files. Do not run git commands that alter working state.',
@@ -411,16 +411,16 @@ test('GET /sessions/:id/events suppresses standalone OMX Explore harness prompts
     'Reference behavior contract:',
     '---------------- BEGIN EXPLORE PROMPT ----------------',
     '---',
-    'description: "Shell-only repository exploration contract for omx explore"',
+    'description: "Shell-only repository exploration contract for codex explore"',
     'argument-hint: "task description"',
     '---',
     '<identity>',
-    'You are OMX Explore, a low-cost shell-only repository exploration harness.',
+    'You are Codex Explore, a low-cost shell-only repository exploration harness.',
     '</identity>',
     '---------------- END EXPLORE PROMPT ----------------',
     '',
     'User request:',
-    '[OMX Wiki Status]',
+    '[Codex Wiki Status]',
     'Wiki evidence is weak or missing.',
     '',
     '[Original Explore Prompt]',
@@ -435,13 +435,13 @@ test('GET /sessions/:id/events suppresses standalone OMX Explore harness prompts
   const server = createServer({ projectRoot: root, codexHome });
   const events = await request(server, `/sessions/${codexSessionId}/events`);
 
-  assert.equal(events.json.events.some((event) => event.type === 'CommandSubmitted' && /OMX Explore|BEGIN EXPLORE PROMPT|Original Explore Prompt/.test(event.text)), false);
+  assert.equal(events.json.events.some((event) => event.type === 'CommandSubmitted' && /Codex Explore|BEGIN EXPLORE PROMPT|Original Explore Prompt/.test(event.text)), false);
 });
 
-test('GET /sessions/:id/events strips quoted OMX Explore harness prefix but preserves user question', async () => {
+test('GET /sessions/:id/events strips quoted Codex Explore harness prefix but preserves user question', async () => {
   const { root, codexHome, codexSessionId, logPath } = await fixture();
   const quotedHarnessQuestion = [
-    '"You are OMX Explore, a low-cost read-only repository exploration harness.',
+    '"You are Codex Explore, a low-cost read-only repository exploration harness.',
     'Operate strictly in read-only mode. You may use repository-inspection shell commands only.',
     '',
     'Reference behavior contract:',
@@ -460,7 +460,7 @@ test('GET /sessions/:id/events strips quoted OMX Explore harness prefix but pres
 
   assert.ok(commandEvent);
   assert.equal(commandEvent.text, '이와 같은 프롬프트 전달 User Command 이벤트가 왜 오냐');
-  assert.doesNotMatch(commandEvent.text, /OMX Explore|BEGIN EXPLORE PROMPT/);
+  assert.doesNotMatch(commandEvent.text, /Codex Explore|BEGIN EXPLORE PROMPT/);
 });
 
 test('GET /sessions/:id/events strips synthetic prompt contract structure without identity sentence anchor', async () => {
@@ -471,7 +471,7 @@ test('GET /sessions/:id/events strips synthetic prompt contract structure withou
     'Reference behavior contract:',
     '---------------- BEGIN REPOSITORY LOOKUP PROMPT ----------------',
     '---',
-    'description: "Shell-only repository exploration contract for omx explore"',
+    'description: "Shell-only repository exploration contract for codex explore"',
     'argument-hint: "task description"',
     '---',
     '<identity>',
@@ -565,7 +565,7 @@ test('POST /sessions/:id/commands dryRun records audit-only interaction without 
   assert.equal(res.json.interaction.codexSessionId, codexSessionId);
   assert.equal(res.json.interaction.threadId, codexSessionId);
 
-  const bridgeLog = await readFile(join(root, '.omx', 'logs', 'bridge-interactions.jsonl'), 'utf8');
+  const bridgeLog = await readFile(join(root, '.codex', 'logs', 'bridge-interactions.jsonl'), 'utf8');
   const bridgeRecord = JSON.parse(bridgeLog.trim());
   assert.equal(bridgeRecord.source, 'bridge');
   assert.equal(bridgeRecord.commandText, prompt);
@@ -601,7 +601,7 @@ test('POST /sessions/:id/commands normalizes Hermes operator wrappers before rec
   assert.ok(res.json.promptNormalization.rules.includes('strip-operator-prefix'));
   assert.equal(res.json.interaction.metadata.promptNormalization.rawCommandText, rawPrompt);
 
-  const bridgeLog = await readFile(join(root, '.omx', 'logs', 'bridge-interactions.jsonl'), 'utf8');
+  const bridgeLog = await readFile(join(root, '.codex', 'logs', 'bridge-interactions.jsonl'), 'utf8');
   const bridgeRecord = JSON.parse(bridgeLog.trim());
   assert.equal(bridgeRecord.commandText, normalizedPrompt);
   assert.equal(bridgeRecord.metadata.promptNormalization.changed, true);
@@ -777,7 +777,7 @@ test('POST /sessions/:id/commands preserves Discord component metadata for audit
       dryRun: true,
       source: 'discord-component',
       discordInteractionId: 'discord-interaction-1',
-      componentCustomId: 'omx:approval:1',
+      componentCustomId: 'codex:approval:1',
       componentAction: 'approval',
     }),
   });
@@ -786,11 +786,11 @@ test('POST /sessions/:id/commands preserves Discord component metadata for audit
   assert.equal(res.json.interaction.metadata.source, 'discord-component');
   assert.equal(res.json.interaction.metadata.discordInteractionId, 'discord-interaction-1');
 
-  const bridgeLog = await readFile(join(root, '.omx', 'logs', 'bridge-interactions.jsonl'), 'utf8');
+  const bridgeLog = await readFile(join(root, '.codex', 'logs', 'bridge-interactions.jsonl'), 'utf8');
   const bridgeRecord = JSON.parse(bridgeLog.trim());
-  assert.equal(bridgeRecord.metadata.componentCustomId, 'omx:approval:1');
+  assert.equal(bridgeRecord.metadata.componentCustomId, 'codex:approval:1');
 
-  const auditLog = await readFile(join(root, '.omx', 'logs', 'bridge-audit.jsonl'), 'utf8');
+  const auditLog = await readFile(join(root, '.codex', 'logs', 'bridge-audit.jsonl'), 'utf8');
   const audit = auditLog.trim().split('\n').map((line) => JSON.parse(line));
   assert.ok(audit.some((entry) => entry.eventType === 'command.accepted'
     && entry.metadata.discordInteractionId === 'discord-interaction-1'));
@@ -811,7 +811,7 @@ test('POST /sessions/:id/commands with Discord Hermes approval gate registers UI
         commandText: '치즈 질문: 정제된 프롬프트 전송',
         mode: 'tmux',
         submit: false,
-        approvalGate: 'discord-hermes-omx-send',
+        approvalGate: 'discord-hermes-codex-send',
         source: 'discord-hermes',
         discordInteractionId: 'discord-command-1',
       }),
@@ -819,8 +819,8 @@ test('POST /sessions/:id/commands with Discord Hermes approval gate registers UI
 
     assert.equal(res.status, 202);
     assert.equal(res.json.delivery.status, 'approval-pending');
-    assert.equal(res.json.question.kind, 'omx-send-approval');
-    assert.equal(res.json.question.metadata.gate, 'discord-hermes-omx-send');
+    assert.equal(res.json.question.kind, 'codex-send-approval');
+    assert.equal(res.json.question.metadata.gate, 'discord-hermes-codex-send');
     assert.equal(res.json.question.metadata.commandText, '정제된 프롬프트 전송');
     assert.equal(res.json.question.metadata.commandMetadata.discordInteractionId, 'discord-command-1');
     assert.equal(res.json.answer_endpoint, `/sessions/${codexSessionId}/question-answers`);
@@ -834,16 +834,16 @@ test('POST /sessions/:id/commands with Discord Hermes approval gate registers UI
     assert.equal(Object.hasOwn(res.json, 'interaction'), false);
 
     assert.equal(await readFile(fakeTmuxCallsPath, 'utf8').catch(() => ''), '');
-    assert.equal(await readFile(join(root, '.omx', 'logs', 'bridge-interactions.jsonl'), 'utf8').catch(() => ''), '');
+    assert.equal(await readFile(join(root, '.codex', 'logs', 'bridge-interactions.jsonl'), 'utf8').catch(() => ''), '');
     assert.equal(flushes.length, 0);
 
-    const questions = await readJsonlFile(join(root, '.omx', 'state', 'bridge-question-requests.jsonl'));
+    const questions = await readJsonlFile(join(root, '.codex', 'state', 'bridge-question-requests.jsonl'));
     assert.equal(questions.length, 1);
-    assert.equal(questions[0].kind, 'omx-send-approval');
+    assert.equal(questions[0].kind, 'codex-send-approval');
   });
 });
 
-test('POST /sessions/:id/question-answers approves gated omx-send exactly once', async () => {
+test('POST /sessions/:id/question-answers approves gated codex-send exactly once', async () => {
   const { root, codexHome, codexSessionId, fakeTmuxBin, fakeTmuxCallsPath } = await fixture();
   const flushes = [];
   const serverOptions = {
@@ -862,7 +862,7 @@ test('POST /sessions/:id/question-answers approves gated omx-send exactly once',
         commandText: '승인 후 한 번만 전송',
         mode: 'tmux',
         submit: false,
-        approvalGate: 'discord-hermes-omx-send',
+        approvalGate: 'discord-hermes-codex-send',
       }),
     });
     const questionId = gate.json.question.questionId;
@@ -930,7 +930,7 @@ test('POST /sessions/:id/question-answers approves gated omx-send exactly once',
       assert.equal(late.json.delivery.status, 'already-finalized');
     }
 
-    const bridgeRecords = await readJsonlFile(join(root, '.omx', 'logs', 'bridge-interactions.jsonl'));
+    const bridgeRecords = await readJsonlFile(join(root, '.codex', 'logs', 'bridge-interactions.jsonl'));
     assert.equal(bridgeRecords.length, 1);
     assert.equal(bridgeRecords[0].commandText, '승인 후 한 번만 전송');
     assert.equal(bridgeRecords[0].metadata.approval.questionId, questionId);
@@ -938,19 +938,19 @@ test('POST /sessions/:id/question-answers approves gated omx-send exactly once',
     const calls = await readFile(fakeTmuxCallsPath, 'utf8');
     assert.equal((calls.match(/승인 후 한 번만 전송/g) || []).length, 1);
 
-    const decisions = await readJsonlFile(join(root, '.omx', 'state', 'bridge-omx-send-approvals.jsonl'));
+    const decisions = await readJsonlFile(join(root, '.codex', 'state', 'bridge-codex-send-approvals.jsonl'));
     assert.deepEqual(decisions.map((item) => item.state), ['send_claimed', 'dispatch_succeeded']);
   });
 });
 
-test('POST /sessions/:id/question-answers rejects or modifies gated omx-send without dispatch', async () => {
+test('POST /sessions/:id/question-answers rejects or modifies gated codex-send without dispatch', async () => {
   const { root, codexHome, codexSessionId, fakeTmuxBin, fakeTmuxCallsPath } = await fixture();
   const serverOptions = { projectRoot: root, codexHome };
   await withEnv({ TMUX_BIN: fakeTmuxBin }, async () => {
     const rejectGate = await request(createServer(serverOptions), `/sessions/${codexSessionId}/commands`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ commandText: '거절 대상', mode: 'tmux', approvalGate: 'discord-hermes-omx-send' }),
+      body: JSON.stringify({ commandText: '거절 대상', mode: 'tmux', approvalGate: 'discord-hermes-codex-send' }),
     });
     const reject = await request(createServer(serverOptions), `/sessions/${codexSessionId}/question-answers`, {
       method: 'POST',
@@ -978,7 +978,7 @@ test('POST /sessions/:id/question-answers rejects or modifies gated omx-send wit
     const modifyGate = await request(createServer(serverOptions), `/sessions/${codexSessionId}/commands`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ commandText: '수정 대상', mode: 'tmux', approvalGate: 'discord-hermes-omx-send' }),
+      body: JSON.stringify({ commandText: '수정 대상', mode: 'tmux', approvalGate: 'discord-hermes-codex-send' }),
     });
     const modify = await request(createServer(serverOptions), `/sessions/${codexSessionId}/question-answers`, {
       method: 'POST',
@@ -1006,8 +1006,8 @@ test('POST /sessions/:id/question-answers rejects or modifies gated omx-send wit
     assert.equal(sendAfterModify.json.delivery.status, 'already-finalized');
 
     assert.equal(await readFile(fakeTmuxCallsPath, 'utf8').catch(() => ''), '');
-    assert.equal(await readFile(join(root, '.omx', 'logs', 'bridge-interactions.jsonl'), 'utf8').catch(() => ''), '');
-    const decisions = await readJsonlFile(join(root, '.omx', 'state', 'bridge-omx-send-approvals.jsonl'));
+    assert.equal(await readFile(join(root, '.codex', 'logs', 'bridge-interactions.jsonl'), 'utf8').catch(() => ''), '');
+    const decisions = await readJsonlFile(join(root, '.codex', 'state', 'bridge-codex-send-approvals.jsonl'));
     assert.deepEqual(decisions.map((item) => item.state), ['rejected', 'modification_requested']);
   });
 });
@@ -1027,7 +1027,7 @@ test('approval gate rejects unsupported gates and orphan claimed approvals fail 
     const gate = await request(createServer(serverOptions), `/sessions/${codexSessionId}/commands`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ commandText: 'orphan claimed', mode: 'tmux', approvalGate: 'discord-hermes-omx-send' }),
+      body: JSON.stringify({ commandText: 'orphan claimed', mode: 'tmux', approvalGate: 'discord-hermes-codex-send' }),
     });
     const questionId = gate.json.question.questionId;
     await appendApprovalDecision({
@@ -1037,7 +1037,7 @@ test('approval gate rejects unsupported gates and orphan claimed approvals fail 
       questionId,
       state: 'send_claimed',
       questionAnswerId: 'orphan-answer',
-      delivery: { ok: true, status: 'send_claimed', backend: 'bridge-omx-send-approval' },
+      delivery: { ok: true, status: 'send_claimed', backend: 'bridge-codex-send-approval' },
     }, { projectRoot: root });
 
     const approve = await request(createServer(serverOptions), `/sessions/${codexSessionId}/question-answers`, {
@@ -1053,7 +1053,7 @@ test('approval gate rejects unsupported gates and orphan claimed approvals fail 
     assert.equal(approve.json.delivery.status, 'already-finalized');
     assert.equal(approve.json.delivery.state, 'send_claimed');
     assert.equal(await readFile(fakeTmuxCallsPath, 'utf8').catch(() => ''), '');
-    assert.equal(await readFile(join(root, '.omx', 'logs', 'bridge-interactions.jsonl'), 'utf8').catch(() => ''), '');
+    assert.equal(await readFile(join(root, '.codex', 'logs', 'bridge-interactions.jsonl'), 'utf8').catch(() => ''), '');
   });
 });
 
@@ -1076,7 +1076,7 @@ test('POST /sessions/:id/question-answers records single, multi, and other answe
       questionId: 'q-single',
       source: 'discord-component',
       discordInteractionId: 'dq-1',
-      componentCustomId: 'omx:q:1',
+      componentCustomId: 'codex:q:1',
       answer: {
         kind: 'option',
         value: 'ralplan',
@@ -1191,10 +1191,10 @@ test('POST /sessions/:id/question-answers records single, multi, and other answe
   assert.deepEqual(other.json.questionAnswer.answer.selected_values, ['__other__']);
   assert.equal(other.json.questionAnswer.answer.other_text, '직접 입력한 제약');
 
-  const queueLog = await readFile(join(root, '.omx', 'state', 'bridge-question-answers.jsonl'), 'utf8');
+  const queueLog = await readFile(join(root, '.codex', 'state', 'bridge-question-answers.jsonl'), 'utf8');
   assert.equal(queueLog.trim().split('\n').length, 4);
 
-  const auditLog = await readFile(join(root, '.omx', 'logs', 'bridge-audit.jsonl'), 'utf8');
+  const auditLog = await readFile(join(root, '.codex', 'logs', 'bridge-audit.jsonl'), 'utf8');
   const audit = auditLog.trim().split('\n').map((line) => JSON.parse(line));
   assert.ok(audit.some((entry) => entry.eventType === 'question_answer.queued'
     && entry.discordInteractionId === 'dq-2'
@@ -1277,7 +1277,7 @@ test('runtime project root ignores BRIDGE_STATE_ROOT storage location', async ()
   assert.equal(resolveRuntimeProjectRoot({ BRIDGE_STATE_ROOT: stateRoot, PROJECT_ROOT: join(root, 'project') }, root), join(root, 'project'));
 });
 
-test('BRIDGE_STATE_ROOT keeps bridge operation logs outside project .omx logs', async () => {
+test('BRIDGE_STATE_ROOT keeps bridge operation logs outside project .codex logs', async () => {
   const { root, codexHome, codexSessionId } = await fixture();
   const bridgeStateRoot = join(root, 'bridge-state');
   await withEnv({ BRIDGE_STATE_ROOT: bridgeStateRoot }, async () => {
@@ -1291,7 +1291,7 @@ test('BRIDGE_STATE_ROOT keeps bridge operation logs outside project .omx logs', 
 
     const stateLog = await readFile(join(bridgeStateRoot, 'bridge-interactions.jsonl'), 'utf8');
     assert.match(stateLog, /상태 루트 분리 확인/);
-    const projectLog = await readFile(join(root, '.omx', 'logs', 'bridge-interactions.jsonl'), 'utf8').catch(() => '');
+    const projectLog = await readFile(join(root, '.codex', 'logs', 'bridge-interactions.jsonl'), 'utf8').catch(() => '');
     assert.equal(projectLog, '');
   });
 });
@@ -1300,7 +1300,7 @@ test('POST /sessions/:id/commands uses tmux target without submit key when submi
   const { root, codexHome, fakeTmuxBin, fakeTmuxCallsPath } = await fixture();
   await withEnv({ TMUX_BIN: fakeTmuxBin }, async () => {
     const server = createServer({ projectRoot: root, codexHome });
-    const res = await request(server, '/sessions/omx-1777379336693-sjhnhr/commands', {
+    const res = await request(server, '/sessions/codex-1777379336693-sjhnhr/commands', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ commandText: 'tmux 전달 테스트', submit: false }),
@@ -1322,7 +1322,7 @@ test('POST /sessions/:id/commands preserves Codex slash commands as tmux input',
     const { root, codexHome, fakeTmuxBin, fakeTmuxCallsPath } = await fixture();
     await withEnv({ TMUX_BIN: fakeTmuxBin }, async () => {
       const server = createServer({ projectRoot: root, codexHome });
-      const res = await request(server, '/sessions/omx-1777379336693-sjhnhr/commands', {
+      const res = await request(server, '/sessions/codex-1777379336693-sjhnhr/commands', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ commandText: slashCommand, mode: 'tmux', submit: false }),
@@ -1334,7 +1334,7 @@ test('POST /sessions/:id/commands preserves Codex slash commands as tmux input',
 
       const calls = await readFile(fakeTmuxCallsPath, 'utf8');
       assert.match(calls, new RegExp(`send-keys -t %77 -l -- ${slashCommand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-      assert.doesNotMatch(calls, /omx-new/);
+      assert.doesNotMatch(calls, /codex-new/);
       assert.doesNotMatch(calls, /Enter/);
     });
   }
@@ -1343,7 +1343,7 @@ test('POST /sessions/:id/commands preserves Codex slash commands as tmux input',
 test('POST /sessions/:id/commands treats numeric helper flags as booleans', async () => {
   const { root, codexHome, fakeTmuxBin, fakeTmuxCallsPath } = await fixture();
   await withEnv({ TMUX_BIN: fakeTmuxBin }, async () => {
-    const dryRun = await request(createServer({ projectRoot: root, codexHome }), '/sessions/omx-1777379336693-sjhnhr/commands', {
+    const dryRun = await request(createServer({ projectRoot: root, codexHome }), '/sessions/codex-1777379336693-sjhnhr/commands', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ commandText: '숫자 dry-run 확인', dryRun: 1 }),
@@ -1353,7 +1353,7 @@ test('POST /sessions/:id/commands treats numeric helper flags as booleans', asyn
     assert.equal(dryRun.json.delivery.dryRun, true);
     assert.equal(await readFile(fakeTmuxCallsPath, 'utf8').catch(() => ''), '');
 
-    const hold = await request(createServer({ projectRoot: root, codexHome }), '/sessions/omx-1777379336693-sjhnhr/commands', {
+    const hold = await request(createServer({ projectRoot: root, codexHome }), '/sessions/codex-1777379336693-sjhnhr/commands', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ commandText: '숫자 hold 확인', mode: 'tmux', submit: 0 }),
@@ -1372,7 +1372,7 @@ test('POST /sessions/:id/commands sends Enter submit key by default', async () =
   const { root, codexHome, fakeTmuxBin, fakeTmuxCallsPath } = await fixture();
   await withEnv({ TMUX_BIN: fakeTmuxBin }, async () => {
     const server = createServer({ projectRoot: root, codexHome });
-    const res = await request(server, '/sessions/omx-1777379336693-sjhnhr/commands', {
+    const res = await request(server, '/sessions/codex-1777379336693-sjhnhr/commands', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ commandText: 'tmux 제출 테스트', mode: 'tmux' }),
@@ -1433,8 +1433,8 @@ test('unknown routes and unsupported mutating methods keep existing error contra
 
 test('GET and POST /projects/:project/channel resolve and persist project channel mapping', async () => {
   const { root, codexHome } = await fixture();
-  const mapPath = join(root, '.omx', 'state', 'project-channels.json');
-  await mkdir(join(root, '.omx', 'state'), { recursive: true });
+  const mapPath = join(root, '.codex', 'state', 'project-channels.json');
+  await mkdir(join(root, '.codex', 'state'), { recursive: true });
   await writeFile(mapPath, JSON.stringify({ default: 'fallback-channel', projects: {} }));
 
   await withEnv({ BRIDGE_HERMES_PROJECT_CHANNEL_MAP: mapPath }, async () => {
@@ -1465,7 +1465,7 @@ test('GET and POST /projects/:project/channel resolve and persist project channe
     assert.equal(saved.projects['chiz-wiki'], 'project-channel');
     assert.equal(saved.channelNames['chiz-wiki'], 'chiz-wiki');
 
-    const auditContent = await readFile(join(root, '.omx', 'logs', 'bridge-audit.jsonl'), 'utf8');
+    const auditContent = await readFile(join(root, '.codex', 'logs', 'bridge-audit.jsonl'), 'utf8');
     const audit = auditContent.trim().split('\n').map((line) => JSON.parse(line));
     assert.ok(audit.some((entry) => entry.eventType === 'project.channel_mapped' && entry.project === 'chiz-wiki'));
   });
@@ -1484,8 +1484,8 @@ test('POST /projects/:project/channel validates channelId', async () => {
 
 test('POST /projects/:project/channel rejects fallback channel persistence by default', async () => {
   const { root, codexHome } = await fixture();
-  const mapPath = join(root, '.omx', 'state', 'project-channels.json');
-  await mkdir(join(root, '.omx', 'state'), { recursive: true });
+  const mapPath = join(root, '.codex', 'state', 'project-channels.json');
+  await mkdir(join(root, '.codex', 'state'), { recursive: true });
   await writeFile(mapPath, JSON.stringify({ default: 'fallback-channel', projects: {} }));
 
   await withEnv({ BRIDGE_HERMES_PROJECT_CHANNEL_MAP: mapPath }, async () => {

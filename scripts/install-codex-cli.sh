@@ -3,18 +3,18 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Install hermes-omx-bridge helper CLIs onto PATH.
+Install hermes-codex-bridge helper CLIs onto PATH.
 
 Usage:
-  scripts/install-omx-cli.sh [options]
+  scripts/install-codex-cli.sh [options]
 
 Installs:
-  omx-new   Start a visible OMX/Codex tmux session
-  omx-send  Send follow-up commands through the bridge API
-  omx-kill  Stop the tmux session referenced by a bridge session
+  codex-new   Start a visible Codex tmux session
+  codex-send  Send follow-up commands through the bridge API
+  codex-kill  Stop the tmux session referenced by a bridge session
 
 Options:
-  --dir PATH          Target bin directory (default: $OMX_CLI_INSTALL_DIR or ~/.local/bin)
+  --dir PATH          Target bin directory (default: $CODEX_CLI_INSTALL_DIR or ~/.local/bin)
   --repo-root PATH    Bridge repository root (default: parent of scripts/)
   --copy              Copy files instead of creating symlinks
   --force             Replace existing files/links at the target path
@@ -23,7 +23,7 @@ Options:
   -h, --help          Show help
 
 Notes:
-  - This installer only manages omx-new, omx-send, and omx-kill.
+  - This installer only manages codex-new, codex-send, and codex-kill.
   - It does not install or modify Codex global hooks.
   - Keep the target directory on PATH for Hermes/Gateway workers.
 USAGE
@@ -32,12 +32,12 @@ USAGE
 script_name="$(basename "$0")"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-target_dir="${OMX_CLI_INSTALL_DIR:-$HOME/.local/bin}"
+target_dir="${CODEX_CLI_INSTALL_DIR:-$HOME/.local/bin}"
 copy_mode=0
 force=0
 uninstall=0
 dry_run=0
-tools=(omx-new omx-send omx-kill)
+tools=(codex-new codex-send codex-kill)
 
 log() { printf '%s\n' "$*"; }
 die() { echo "$script_name: $*" >&2; exit 1; }

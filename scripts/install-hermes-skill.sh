@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Install Hermes OMX bridge/read and helper lifecycle skills.
+Install Hermes Codex bridge/read and helper lifecycle skills.
 
 Usage:
   scripts/install-hermes-skill.sh [options]
@@ -11,9 +11,9 @@ Usage:
 Options:
   --hermes-home PATH    Hermes home (default: $HERMES_HOME or ~/.hermes)
   --category NAME       Skill category folder (default: autonomous-ai-agents)
-  --name NAME           Skill folder name (default: hermes-omx-bridge)
-  --source PATH         Source skill dir (default: repo skills/hermes-omx-bridge)
-  --no-helper-skills    Do not install omx-new/omx-send/omx-kill helper skills
+  --name NAME           Skill folder name (default: hermes-codex-bridge)
+  --source PATH         Source skill dir (default: repo skills/hermes-codex-bridge)
+  --no-helper-skills    Do not install codex-new/codex-send/codex-kill helper skills
   --dry-run             Print actions without writing
   -h, --help            Show help
 USAGE
@@ -23,8 +23,8 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 hermes_home="${HERMES_HOME:-$HOME/.hermes}"
 category="autonomous-ai-agents"
-name="hermes-omx-bridge"
-source_dir="$repo_root/skills/hermes-omx-bridge"
+name="hermes-codex-bridge"
+source_dir="$repo_root/skills/hermes-codex-bridge"
 dry_run=0
 install_helper_skills=1
 
@@ -86,8 +86,8 @@ synced_profile_skills=()
 install_skill "$name" "$source_dir"
 
 installed_helper_skills=()
-if [[ "$install_helper_skills" == "1" && "$name" == "hermes-omx-bridge" && "$source_dir" == "$repo_root/skills/hermes-omx-bridge" ]]; then
-  for helper_skill in omx-new omx-send omx-kill; do
+if [[ "$install_helper_skills" == "1" && "$name" == "hermes-codex-bridge" && "$source_dir" == "$repo_root/skills/hermes-codex-bridge" ]]; then
+  for helper_skill in codex-new codex-send codex-kill; do
     helper_source_dir="$repo_root/skills/$helper_skill"
     install_skill "$helper_skill" "$helper_source_dir"
     sync_existing_profile_skill "$helper_skill" "$helper_source_dir"
@@ -98,7 +98,7 @@ fi
 cat <<EOF2
 Installed Hermes skill: $name
 Target: $hermes_home/skills/$category/$name
-OMX helper skills: $([[ "${#installed_helper_skills[@]}" -gt 0 ]] && printf '%s ' "${installed_helper_skills[@]}" || echo "not installed")
+Codex helper skills: $([[ "${#installed_helper_skills[@]}" -gt 0 ]] && printf '%s ' "${installed_helper_skills[@]}" || echo "not installed")
 Synced existing profile helper skills: $([[ "${#synced_profile_skills[@]}" -gt 0 ]] && printf '%s ' "${synced_profile_skills[@]}" || echo "none")
 
 Restart or reload Hermes gateway if it is already running:
@@ -106,7 +106,7 @@ Restart or reload Hermes gateway if it is already running:
 
 Check installed skills:
   hermes skills list | grep '$name'
-  hermes skills list | grep 'omx-new'
-  hermes skills list | grep 'omx-send'
-  hermes skills list | grep 'omx-kill'
+  hermes skills list | grep 'codex-new'
+  hermes skills list | grep 'codex-send'
+  hermes skills list | grep 'codex-kill'
 EOF2

@@ -24,7 +24,7 @@ export function payloadDigest(payloadJson) {
 }
 
 export function sessionIdFor(session = {}) {
-  return session.bridgeSessionId || session.omxSessionId || session.codexSessionId || session.threadId || session.tmuxPaneId || session.tmuxId || 'unknown-session';
+  return session.bridgeSessionId || session.lifecycleSessionId || session.codexSessionId || session.threadId || session.tmuxPaneId || session.tmuxId || 'unknown-session';
 }
 
 export function sessionNativeId(session = {}) {
@@ -42,18 +42,18 @@ export function nativeSessionIdFor(session = {}) {
 export function sessionStartMappingChangedAfterReconcile(previousSession = {}, nextSession = {}) {
   if (nextSession.status !== 'active') return false;
 
-  const previousOmxId = previousSession.omxSessionId || null;
-  const nextOmxId = nextSession.omxSessionId || null;
-  if (!previousOmxId || !nextOmxId || previousOmxId !== nextOmxId) return false;
-  if (nextSession.runtimeOmxSessionId && nextSession.runtimeOmxSessionId !== nextOmxId && nextSession.resumedCodexSession !== true) {
+  const previousCodexId = previousSession.lifecycleSessionId || null;
+  const nextCodexId = nextSession.lifecycleSessionId || null;
+  if (!previousCodexId || !nextCodexId || previousCodexId !== nextCodexId) return false;
+  if (nextSession.runtimeBridgeSessionId && nextSession.runtimeBridgeSessionId !== nextCodexId && nextSession.resumedCodexSession !== true) {
     return false;
   }
 
   const previousNativeId = sessionNativeId(previousSession);
   const nextNativeId = sessionNativeId(nextSession);
   if (!previousNativeId || !nextNativeId || previousNativeId === nextNativeId) return false;
-  if (previousNativeId === previousOmxId && nextSession.resumedCodexSession !== true) return false;
-  if (nextNativeId === nextOmxId) return false;
+  if (previousNativeId === previousCodexId && nextSession.resumedCodexSession !== true) return false;
+  if (nextNativeId === nextCodexId) return false;
 
   return true;
 }
@@ -66,7 +66,7 @@ export function sessionLinkedEventId(sessionStartEventId, nextSession = {}) {
 export function sessionLinkedEvent(previousSession = {}, nextSession = {}, sessionStartEvent = {}, sessionStartEventId = '') {
   const previousNativeId = nativeSessionIdFor(previousSession);
   const nextNativeId = nativeSessionIdFor(nextSession);
-  const omxSessionId = nextSession.omxSessionId || previousSession.omxSessionId || null;
+  const lifecycleSessionId = nextSession.lifecycleSessionId || previousSession.lifecycleSessionId || null;
   return {
     eventId: sessionLinkedEventId(sessionStartEventId, nextSession),
     type: 'SessionLinked',
@@ -74,14 +74,14 @@ export function sessionLinkedEvent(previousSession = {}, nextSession = {}, sessi
     source: 'notification',
     text: [
       '세션이 새 Codex thread에 연결됐어.',
-      omxSessionId ? `Session: ${omxSessionId}` : null,
+      lifecycleSessionId ? `Session: ${lifecycleSessionId}` : null,
       previousNativeId ? `Previous Codex: ${previousNativeId}` : null,
       nextNativeId ? `Codex: ${nextNativeId}` : null,
     ].filter(Boolean).join('\n'),
-    backend: sessionStartEvent.backend || 'omx',
+    backend: sessionStartEvent.backend || 'codex',
     previousCodexSessionId: previousNativeId || null,
     codexSessionId: nextNativeId || null,
-    omxSessionId,
+    lifecycleSessionId,
   };
 }
 

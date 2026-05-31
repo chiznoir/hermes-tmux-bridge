@@ -1,44 +1,44 @@
 ---
-name: omx-send
-description: Send a refined follow-up instruction to an existing OMX/Codex session through hermes-omx-bridge using the local omx-send helper. Trigger when the user asks to 전달/보내/넘겨/반영/수정/계속 into an OMX session or replies to an OMX notification.
+name: codex-send
+description: Send a refined follow-up instruction to an existing Codex session through hermes-codex-bridge using the local codex-send helper. Trigger when the user asks to 전달/보내/넘겨/반영/수정/계속 into an Codex session or replies to an Codex notification.
 version: 0.2.0
 prerequisites:
-  commands: [omx-send]
+  commands: [codex-send]
 metadata:
   hermes:
-    tags: [omx, bridge, command, codex, tmux]
-    related_skills: [hermes-omx-bridge, omx-new, omx-kill]
+    tags: [codex, bridge, command, codex, tmux]
+    related_skills: [hermes-codex-bridge, codex-new, codex-kill]
     requires_toolsets: [terminal]
     triggers:
-      - 전달, 전달해, 보내, 넘겨, 세션에 전달, follow-up -> omx-send
-      - 세션에 넣어, 답장하기, 위 내용 전달, 답장으로 보낸 거, 방금 알림에 대한 말 -> omx-send
-      - 반영, 수정, 고쳐, 계속, 진행, 이거 반영, 알림 reply, 알림에 답장, Notification reply -> omx-send
-      - Discord-originated Hermes reply dispatch -> omx-send --discord-approval
-      - AskPermission 승인/거절, /approve, /deny -> omx-send --mode tmux
-      - 새 세션, 세션 열어, 시작해 -> use omx-new instead
-      - 종료, kill, 킬, 죽여 -> use omx-kill instead
+      - 전달, 전달해, 보내, 넘겨, 세션에 전달, follow-up -> codex-send
+      - 세션에 넣어, 답장하기, 위 내용 전달, 답장으로 보낸 거, 방금 알림에 대한 말 -> codex-send
+      - 반영, 수정, 고쳐, 계속, 진행, 이거 반영, 알림 reply, 알림에 답장, Notification reply -> codex-send
+      - Discord-originated Hermes reply dispatch -> codex-send --discord-approval
+      - AskPermission 승인/거절, /approve, /deny -> codex-send --mode tmux
+      - 새 세션, 세션 열어, 시작해 -> use codex-new instead
+      - 종료, kill, 킬, 죽여 -> use codex-kill instead
 ---
 
-# OMX Send
+# Codex Send
 
-This dispatch-specific skill exists because Hermes may load `omx-send` directly when the user names that skill or replies to a session notification. `hermes-omx-bridge` owns bridge read/status/rendering; this file owns the critical dispatch contract so direct `skill_view("omx-send")` does not bypass prompt refinement.
+This dispatch-specific skill exists because Hermes may load `codex-send` directly when the user names that skill or replies to a session notification. `hermes-codex-bridge` owns bridge read/status/rendering; this file owns the critical dispatch contract so direct `skill_view("codex-send")` does not bypass prompt refinement.
 
-Use `omx-send` to dispatch commands through hermes-omx-bridge. Do not hand-build raw bridge `curl` calls. Do not silently fall back to raw tmux paste; if bridge delivery fails, report the explicit failure unless the user explicitly asked for visible tmux/manual fallback.
+Use `codex-send` to dispatch commands through hermes-codex-bridge. Do not hand-build raw bridge `curl` calls. Do not silently fall back to raw tmux paste; if bridge delivery fails, report the explicit failure unless the user explicitly asked for visible tmux/manual fallback.
 
-For Discord-originated Hermes replies that dispatch a refined prompt into an existing session, use `omx-send --session <id> --discord-approval "<refined prompt>"`, then immediately present the returned approval question through Hermes `clarify` / AskUserQuestion. The bridge command only registers the pending `omx-send-approval`; it does **not** by itself create Discord buttons. The Discord button/card is real only after Hermes calls `clarify` with the refined prompt and choices. Non-Discord/manual helper use may keep plain `omx-send --session <id>` when the user intentionally wants immediate dispatch.
+For Discord-originated Hermes replies that dispatch a refined prompt into an existing session, use `codex-send --session <id> --discord-approval "<refined prompt>"`, then immediately present the returned approval question through Hermes `clarify` / AskUserQuestion. The bridge command only registers the pending `codex-send-approval`; it does **not** by itself create Discord buttons. The Discord button/card is real only after Hermes calls `clarify` with the refined prompt and choices. Non-Discord/manual helper use may keep plain `codex-send --session <id>` when the user intentionally wants immediate dispatch.
 
 ## Target selection
 
-- In Discord replies, route by the replied notification metadata first: `bridge_session_id`, `session:`, `tmux:`, `project:`, `omxSessionId`, `codexThreadId`.
-- If a concrete bridge session id is present, use `omx-send --session <id>`.
-- If only `tmux:` is present, resolve the active bridge session for that exact tmux id with `omx-send --list`; do not choose another same-project session.
+- In Discord replies, route by the replied notification metadata first: `bridge_session_id`, `session:`, `tmux:`, `project:`, `lifecycleSessionId`, `codexThreadId`.
+- If a concrete bridge session id is present, use `codex-send --session <id>`.
+- If only `tmux:` is present, resolve the active bridge session for that exact tmux id with `codex-send --list`; do not choose another same-project session.
 - Routing labels are target metadata only. Remove them from the prompt sent to Codex.
 - Typical routing labels/operators include `bridge_session_id`, `tmux id`, `bridge session id`, Korean phrases like `이 세션에 전달해`, an explicit session name such as `세션명은 X`, and `X 세션에 넣어`; these are not prompt content and must be removed from the delivered work sentence.
 - Remove routing metadata from the prompt sent to Codex; 프롬프트 본문에 넣지 말고 작업 문장에서는 제거한다.
 
-## Prompt refinement SSoT before `omx-send`
+## Prompt refinement SSoT before `codex-send`
 
-The exact argument passed to `omx-send` MUST already be the refined prompt. Do not pass the raw Discord reply, raw `[Replying to: ...]` wrapper, or raw operator command and expect Codex to infer the real task.
+The exact argument passed to `codex-send` MUST already be the refined prompt. Do not pass the raw Discord reply, raw `[Replying to: ...]` wrapper, or raw operator command and expect Codex to infer the real task.
 
 Priority order:
 
@@ -49,7 +49,7 @@ Priority order:
 
 Do not mix roles: target selection, payload extraction, and prompt refinement are separate steps.
 
-Before any `write_file`, temp-file handoff, shell command, or `omx-send` invocation:
+Before any `write_file`, temp-file handoff, shell command, or `codex-send` invocation:
 
 1. Extract the payload instruction only. Remove Discord/Hermes wrappers such as `[Replying to: ...]`, `[치즈] 이 메시지를 ...에 전달해`, `이 세션에 전달해`, `세션명은 X`, `bridge_session_id`, `tmux id`, and `project:` unless they are part of the user's actual task.
 2. Strip operator prefixes and meta framing such as `전달`, `추가 전달:`, `치즈전달:`, `치즈 질문:`, `치즈 지시:`, `치즈가 전달하래`, `치즈가 물었어`, `사용자 요청:`, `사용자요청:`, `User says:`, `follow-up:`, `the user asked`, and `방금 네 Final Answer에 대해 이렇게 물었어:`.
@@ -81,7 +81,7 @@ Forbidden in the delivered prompt:
 - If the user is angry because a prior dispatch changed meaning, stop elaborating. Acknowledge internally by sending only the corrected minimal payload; do not bundle “helpful” guardrails or broadened acceptance criteria into the resend.
 - When the user says a previous dispatch was wrong and asks to resend/re-deliver, preserve the correction narrowly. Do not “improve” the corrected request by adding extra files, validation steps, manifests, contact sheets, prohibitions, or operational criteria unless the user explicitly restates them. The safe resend shape is usually one direct sentence plus only the minimal target/path needed to disambiguate.
 
-Use `omx-send --raw` only when the user explicitly requests near byte-for-byte delivery with phrases such as “원문 그대로”, “그대로 전달”, “다음 그대로 전달”, `raw`, or equivalent.
+Use `codex-send --raw` only when the user explicitly requests near byte-for-byte delivery with phrases such as “원문 그대로”, “그대로 전달”, “다음 그대로 전달”, `raw`, or equivalent.
 
 Raw-mode extraction still has a boundary: send the user-designated payload, not the entire Discord/operator wrapper. If the user says “다음 그대로 전달”, the raw payload begins after that marker. Do not include `[Replying to: ...]`, `[치즈]`, target metadata used only for routing, or the operator phrase itself unless the user explicitly says those wrappers are part of the payload.
 
@@ -91,18 +91,18 @@ If line breaks matter, a temp file is allowed, but the temp file content must be
 
 ## Discord approval gate
 
-- Discord reply → Hermes → existing OMX/Codex session dispatch MUST prefer `omx-send --discord-approval` after prompt refinement.
+- Discord reply → Hermes → existing Codex session dispatch MUST prefer `codex-send --discord-approval` after prompt refinement.
 - The approval gate is not a second refinement policy. It displays the already-refined prompt and waits for the operator's 전송/거절/추가수정 decision.
-- Important: `omx-send --discord-approval` only creates bridge pending state and returns `answer_endpoint`, `question.questionId`, and `component_actions`. Hermes Gateway does not automatically render arbitrary terminal-tool JSON `component_actions` as Discord buttons.
+- Important: `codex-send --discord-approval` only creates bridge pending state and returns `answer_endpoint`, `question.questionId`, and `component_actions`. Hermes Gateway does not automatically render arbitrary terminal-tool JSON `component_actions` as Discord buttons.
 - Therefore after `delivery.status == "approval-pending"`, Hermes MUST call the native user-question UI (`clarify` / AskUserQuestion) with the exact refined prompt and choices `전송`, `거절`, `추가수정`. This is the same Gateway path that renders Ouroboros-style Discord cards/buttons.
 - Do not answer the user with “승인 요청을 올려뒀어”, “버튼에서 전송 누르면 돼”, or similar unless the `clarify` call actually succeeded and is waiting for the user's choice. If `clarify` is unavailable or returns an error, report that the approval UI failed; do not claim buttons exist.
 - After the user chooses in `clarify`, submit the result through the helper, not a hand-built dispatch curl:
-  - `전송` → `omx-send --session <id> --answer-approval send --question-id <questionId>`
-  - `거절` → `omx-send --session <id> --answer-approval reject --question-id <questionId>`
-  - `추가수정` or an Other/free-text answer → collect the edit text with a second open-ended `clarify` if needed, close the old pending question with `omx-send --session <id> --answer-approval modify --question-id <questionId> --edit "<edit text>"`, run prompt refinement again, and create a new approval-gated `omx-send`; do not dispatch the old prompt after a modify answer.
-- 추가수정 means Hermes must use the returned edit text as a 재정제/new refinement request and create a new approval-gated `omx-send`; do not dispatch the old prompt after a modify answer.
-- AskPermission approval remains separate. `/approve` and `/deny` still use `omx-send --mode tmux` for the same `bridge_session_id`, not `--discord-approval`.
-- Do not make every local/manual `omx-send` approval-gated. The gate is for Discord-originated Hermes dispatch unless the user explicitly asks for another approval path.
+  - `전송` → `codex-send --session <id> --answer-approval send --question-id <questionId>`
+  - `거절` → `codex-send --session <id> --answer-approval reject --question-id <questionId>`
+  - `추가수정` or an Other/free-text answer → collect the edit text with a second open-ended `clarify` if needed, close the old pending question with `codex-send --session <id> --answer-approval modify --question-id <questionId> --edit "<edit text>"`, run prompt refinement again, and create a new approval-gated `codex-send`; do not dispatch the old prompt after a modify answer.
+- 추가수정 means Hermes must use the returned edit text as a 재정제/new refinement request and create a new approval-gated `codex-send`; do not dispatch the old prompt after a modify answer.
+- AskPermission approval remains separate. `/approve` and `/deny` still use `codex-send --mode tmux` for the same `bridge_session_id`, not `--discord-approval`.
+- Do not make every local/manual `codex-send` approval-gated. The gate is for Discord-originated Hermes dispatch unless the user explicitly asks for another approval path.
 
 ## Examples
 
@@ -113,7 +113,7 @@ Raw reply wrapper:
 [치즈] 이 메시지를 019e... 에 전달해.
 ```
 
-Refined `omx-send` prompt:
+Refined `codex-send` prompt:
 
 ```text
 프롬프트 정제가 세션마다 다르게 적용되는 경로를 확인해. 어떤 경로가 정제 규칙을 우회하는지 근거와 수정 필요 여부를 요약해.
@@ -122,9 +122,9 @@ Refined `omx-send` prompt:
 Command shape:
 
 ```bash
-omx-send --session <bridgeSessionId> "<refined prompt>"
-omx-send --session <bridgeSessionId> --discord-approval "<refined prompt>"
-omx-send --session SESSION_ID --answer-approval send|reject --question-id QUESTION_ID
-omx-send --session SESSION_ID --answer-approval modify --question-id QUESTION_ID --edit "<edit text>"
-omx-send --session SESSION_ID [--mode auto|tmux|codex] [--dry|--dry-run] [--hold|--no-submit] "<refined prompt>"
+codex-send --session <bridgeSessionId> "<refined prompt>"
+codex-send --session <bridgeSessionId> --discord-approval "<refined prompt>"
+codex-send --session SESSION_ID --answer-approval send|reject --question-id QUESTION_ID
+codex-send --session SESSION_ID --answer-approval modify --question-id QUESTION_ID --edit "<edit text>"
+codex-send --session SESSION_ID [--mode auto|tmux|codex] [--dry|--dry-run] [--hold|--no-submit] "<refined prompt>"
 ```

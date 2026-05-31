@@ -4,16 +4,16 @@ The recommended install path is `scripts/install-hermes-stack.sh --webhook`. It 
 
 For the Korean version, see [`docs/install-ko.md`](install-ko.md).
 
-For a bridge + Hermes/Discord install without AgentMemory or CodeGraph, use [`docs/bridge-hermes-only-install.md`](bridge-hermes-only-install.md).
+For a minimal bridge + Hermes/Discord install, use [`docs/bridge-hermes-only-install.md`](bridge-hermes-only-install.md).
 
 ## 1. Prerequisites
 
 Dependency criteria:
 
 - Node.js **20+** / npm: required for the bridge server, package install, and tests.
-- `tmux`: required for visible OMX/Codex sessions and `omx-new` / `omx-kill`.
+- `tmux`: required for visible Codex sessions and `codex-new` / `codex-kill`.
 - `curl`: required for health checks, install validation, and bridge HTTP calls.
-- `jq`: required by helper CLIs that read bridge JSON or build JSON payloads. Treat it as required when installing `omx-send` and `omx-kill` onto `PATH`.
+- `jq`: required by helper CLIs that read bridge JSON or build JSON payloads. Treat it as required when installing `codex-send` and `codex-kill` onto `PATH`.
 - Hermes Gateway: required only when webhook/Discord push delivery is enabled. Agent bridge-only mode can be installed without Gateway.
 
 ```bash
@@ -39,14 +39,14 @@ WEBHOOK_SECRET=<same value as the secret file created by scripts/install-hermes-
 ## 2. One-command install
 
 ```bash
-git clone https://github.com/chiznoir/hermes-omx-bridge.git
-cd hermes-omx-bridge
+git clone https://github.com/chiznoir/hermes-codex-bridge.git
+cd hermes-codex-bridge
 npm test
 scripts/install-hermes-stack.sh \
   --webhook \
   --non-interactive \
   --channel <fallback-discord-channel-id> \
-  --project hermes-omx-bridge=<project-discord-channel-id> \
+  --project hermes-codex-bridge=<project-discord-channel-id> \
   --restart
 ```
 
@@ -66,20 +66,20 @@ BRIDGE_HERMES_RESTART_CMD=systemctl --user restart --no-block hermes-gateway.ser
 Created/used files:
 
 ```text
-~/.local/bin/omx-new
-~/.local/bin/omx-send
-~/.local/bin/omx-kill
-~/.config/hermes-omx-bridge/hermes-omx-bridge.env
-~/.hermes/skills/autonomous-ai-agents/hermes-omx-bridge/SKILL.md
-~/.config/systemd/user/hermes-omx-bridge.service
+~/.local/bin/codex-new
+~/.local/bin/codex-send
+~/.local/bin/codex-kill
+~/.config/hermes-codex-bridge/hermes-codex-bridge.env
+~/.hermes/skills/autonomous-ai-agents/hermes-codex-bridge/SKILL.md
+~/.config/systemd/user/hermes-codex-bridge.service
 
 # Only when --webhook is used
-~/.config/hermes-omx-bridge/hermes-webhook.secret
-~/.config/hermes-omx-bridge/project-channels.json
+~/.config/hermes-codex-bridge/hermes-webhook.secret
+~/.config/hermes-codex-bridge/project-channels.json
 ~/.hermes/webhook_subscriptions.json
 ```
 
-The default scope is `--scope user`. The service is installed under `~/.config/systemd/user/hermes-omx-bridge.service`, not `/etc/systemd/system`. Use `systemctl --user ...` for checks and restarts. The service runs `npm start`, and `package.json` maps that to `node src/server.js`.
+The default scope is `--scope user`. The service is installed under `~/.config/systemd/user/hermes-codex-bridge.service`, not `/etc/systemd/system`. Use `systemctl --user ...` for checks and restarts. The service runs `npm start`, and `package.json` maps that to `node src/server.js`.
 
 ## 3. Manual helper CLI install only
 
@@ -88,8 +88,8 @@ If you only need the CLIs, treat the repository `bin/` directory as the SSoT.
 ```bash
 bin/install.sh --force
 # or
-scripts/install-omx-cli.sh --force
-command -v omx-new omx-send omx-kill
+scripts/install-codex-cli.sh --force
+command -v codex-new codex-send codex-kill
 ```
 
 This installer does not modify Codex global hooks.
@@ -99,37 +99,37 @@ This installer does not modify Codex global hooks.
 For localhost-only `127.0.0.1`, a token can be omitted. If another host/container can reach the bridge, enable a token.
 
 ```bash
-mkdir -p ~/.config/hermes-omx-bridge
-openssl rand -hex 32 > ~/.config/hermes-omx-bridge/bridge.token
-chmod 600 ~/.config/hermes-omx-bridge/bridge.token
+mkdir -p ~/.config/hermes-codex-bridge
+openssl rand -hex 32 > ~/.config/hermes-codex-bridge/bridge.token
+chmod 600 ~/.config/hermes-codex-bridge/bridge.token
 
 scripts/install-hermes-stack.sh \
-  --token-file ~/.config/hermes-omx-bridge/bridge.token
+  --token-file ~/.config/hermes-codex-bridge/bridge.token
 ```
 
 Set the same token in Hermes Gateway:
 
 ```env
-OMX_BRIDGE_URL=http://127.0.0.1:3037
-OMX_BRIDGE_TOKEN=<bridge.token value>
+BRIDGE_URL=http://127.0.0.1:3037
+BRIDGE_TOKEN=<bridge.token value>
 ```
 
 ## 5. Validation
 
 ```bash
-systemctl --user list-units --type=service --all | grep hermes-omx-bridge
-systemctl --user status hermes-omx-bridge.service
-systemctl --user cat hermes-omx-bridge.service
+systemctl --user list-units --type=service --all | grep hermes-codex-bridge
+systemctl --user status hermes-codex-bridge.service
+systemctl --user cat hermes-codex-bridge.service
 curl -sS http://127.0.0.1:3037/health
 curl -sS http://127.0.0.1:3037/sessions
-command -v omx-new omx-send omx-kill
+command -v codex-new codex-send codex-kill
 curl -sS http://127.0.0.1:8644/health
 ```
 
 From Discord/Hermes:
 
 ```text
-Use hermes-omx-bridge to check bridge health and sessions.
+Use hermes-codex-bridge to check bridge health and sessions.
 ```
 
 ## 6. Runtime env complexity rule
@@ -140,11 +140,11 @@ The runtime env file should contain only enabled features, secrets/IDs, and non-
 
 ```env
 # Only when exposing the bridge to LAN/Docker/reverse proxy/public access
-# OMX_BRIDGE_TOKEN=<random-long-token>
+# BRIDGE_TOKEN=<random-long-token>
 
 # Required when enabling Hermes webhook sink
 BRIDGE_HERMES_WEBHOOK_ENABLED=true
-BRIDGE_HERMES_WEBHOOK_URL=http://127.0.0.1:8644/webhooks/omx-bridge
+BRIDGE_HERMES_WEBHOOK_URL=http://127.0.0.1:8644/webhooks/codex-bridge
 BRIDGE_HERMES_WEBHOOK_SECRET=<secret>
 BRIDGE_HERMES_DEFAULT_CHANNEL_ID=<fallback-channel-id>
 
@@ -164,14 +164,15 @@ BRIDGE_HERMES_ALLOWLIST=true
 ### Defaults usually omitted
 
 - `HOST=127.0.0.1`, `PORT=3037`, `BRIDGE_PUBLIC_URL=http://127.0.0.1:3037`
-- `BRIDGE_STATE_ROOT=~/.local/state/hermes-omx-bridge` for user services
+- `BRIDGE_STATE_ROOT=~/.local/state/hermes-codex-bridge` for user services
 - `BRIDGE_HERMES_WEBHOOK_EVENT_TYPES=AskPermission,FinalAnswer`
 - `BRIDGE_HERMES_NOTIFICATION_MODE=direct`
-- `BRIDGE_HERMES_PROJECT_CHANNEL_MAP=~/.config/hermes-omx-bridge/project-channels.json`
+- `BRIDGE_HERMES_PROJECT_CHANNEL_MAP=~/.config/hermes-codex-bridge/project-channels.json`
 - `BRIDGE_NOTIFY_EVENT_TYPES=SessionStart,SessionLinked,SessionEnd,CommandSubmitted`
 - `BRIDGE_NOTIFY_DELIVERY_SINK=discord-fast`
 - `BRIDGE_FINAL_BLOCK=true`, `BRIDGE_FINAL_WAIT_MS=10000`, `BRIDGE_FINAL_SINK=hermes`
 - `BRIDGE_HERMES_RESTART=true`, `BRIDGE_HERMES_RESTART_CMD=systemctl --user restart --no-block hermes-gateway.service`
-- `BRIDGE_DISCOVERED_PROJECT_ROOT_MAX=8`, `BRIDGE_MADMAX_RUN_MAX=8`, `BRIDGE_MADMAX_RUN_LOOKBACK_HOURS=12`, `BRIDGE_CODEX_CWD_ATTACH_SCAN_LIMIT=30`
+- `BRIDGE_CODEX_CWD_ATTACH_SCAN_LIMIT=30`
+- `CODEX_EFFORT=high` / `medium` / `xhigh` — set only when `codex-new` should override Codex reasoning effort.
 
 Poll defaults favor fast notifications: `BRIDGE_HERMES_WEBHOOK_INTERVAL_MS=250`, `BRIDGE_NOTIFY_INTERVAL_MS=100`, and max 3 events per poll. Increasing them reduces CPU/Discord calls; it does not drop overflow events.

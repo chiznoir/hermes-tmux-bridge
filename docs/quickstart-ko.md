@@ -1,18 +1,18 @@
-# Quick Start — Hermes OMX Bridge
+# Quick Start — Hermes Codex Bridge
 
 영어 기본 문서는 [`docs/quickstart.md`](quickstart.md)입니다.
 
-이 문서는 이미 Hermes Gateway와 Discord bot이 있는 self-host 환경에서 `hermes-omx-bridge`를 빠르게 붙이는 절차입니다. Hermes/에이전트용 단일 runbook은 repository root의 `INSTALL.md`입니다.
+이 문서는 이미 Hermes Gateway와 Discord bot이 있는 self-host 환경에서 `hermes-codex-bridge`를 빠르게 붙이는 절차입니다. Hermes/에이전트용 단일 runbook은 repository root의 `INSTALL.md`입니다.
 
 Bridge와 Hermes/Discord 알림만 설치하는 agent용 runbook은 `docs/bridge-hermes-only-install-ko.md`입니다.
 
 ## 0. 권장 구조
 
 ```text
-omx / Codex / tmux
-  -> hermes-omx-bridge
+codex / Codex / tmux
+  -> hermes-codex-bridge
      -> Hermes Gateway webhook sink
-  -> Hermes subscription `omx-bridge` + hermes-omx-bridge skill
+  -> Hermes subscription `codex-bridge` + hermes-codex-bridge skill
   -> Discord project channel
 ```
 
@@ -23,7 +23,7 @@ omx / Codex / tmux
 - Node.js **20+** / npm: bridge server와 test/package script 실행.
 - `tmux`: visible session 생성·종료와 tmux-backed dispatch.
 - `curl`: health check와 bridge HTTP 호출.
-- `jq`: `omx-send` / `omx-kill` 등 helper CLI가 bridge JSON을 읽고 JSON payload를 만들 때 사용하므로 helper CLI 설치 모드에서는 필수.
+- `jq`: `codex-send` / `codex-kill` 등 helper CLI가 bridge JSON을 읽고 JSON payload를 만들 때 사용하므로 helper CLI 설치 모드에서는 필수.
 - Hermes Gateway: webhook/Discord push delivery를 쓰는 self-host quick start에서 필요.
 
 ```bash
@@ -38,34 +38,34 @@ systemctl --user status hermes-gateway.service
 ## 2. 권장 원커맨드 설치
 
 ```bash
-git clone https://github.com/chiznoir/hermes-omx-bridge.git
-cd hermes-omx-bridge
+git clone https://github.com/chiznoir/hermes-codex-bridge.git
+cd hermes-codex-bridge
 npm test
 scripts/install-hermes-stack.sh \
   --webhook \
   --non-interactive \
   --channel <fallback-discord-channel-id> \
-  --project hermes-omx-bridge=<project-discord-channel-id> \
+  --project hermes-codex-bridge=<project-discord-channel-id> \
   --restart
 ```
 
-channel ID는 실제 Discord 환경에 맞게 바꿉니다. 이 명령은 repo의 `bin/omx-new`, `bin/omx-send`, `bin/omx-kill`도 `PATH`에 설치합니다. `--webhook` 없는 agent bridge-only 모드는 자동 push 알림 없이 Hermes가 bridge API를 직접 조회하는 최소 설치 모드입니다.
+channel ID는 실제 Discord 환경에 맞게 바꿉니다. 이 명령은 repo의 `bin/codex-new`, `bin/codex-send`, `bin/codex-kill`도 `PATH`에 설치합니다. `--webhook` 없는 agent bridge-only 모드는 자동 push 알림 없이 Hermes가 bridge API를 직접 조회하는 최소 설치 모드입니다.
 
 수동으로 나눠 설치해야 하면 `docs/install-ko.md` 또는 아래 3~4장을 참고하세요.
 
 확인:
 
 ```bash
-systemctl --user status hermes-omx-bridge.service
+systemctl --user status hermes-codex-bridge.service
 curl -sS http://127.0.0.1:3037/health
 curl -sS http://127.0.0.1:3037/sessions
-command -v omx-new omx-send omx-kill
+command -v codex-new codex-send codex-kill
 ```
 
 ## 3. 수동 helper CLI와 Hermes skill 설치
 
 ```bash
-scripts/install-omx-cli.sh --force
+scripts/install-codex-cli.sh --force
 scripts/install-hermes-skill.sh
 systemctl --user restart hermes-gateway.service
 ```
@@ -73,7 +73,7 @@ systemctl --user restart hermes-gateway.service
 설치 위치:
 
 ```text
-~/.hermes/skills/autonomous-ai-agents/hermes-omx-bridge/SKILL.md
+~/.hermes/skills/autonomous-ai-agents/hermes-codex-bridge/SKILL.md
 ```
 
 ## 4. 수동 Hermes webhook sink 연결
@@ -81,15 +81,15 @@ systemctl --user restart hermes-gateway.service
 원커맨드 installer를 쓰지 않고 나눠 설치할 때만 이 단계를 직접 수행합니다. Secret과 project channel map을 준비합니다.
 
 ```bash
-mkdir -p ~/.config/hermes-omx-bridge
-openssl rand -hex 32 > ~/.config/hermes-omx-bridge/hermes-webhook.secret
-chmod 600 ~/.config/hermes-omx-bridge/hermes-webhook.secret
+mkdir -p ~/.config/hermes-codex-bridge
+openssl rand -hex 32 > ~/.config/hermes-codex-bridge/hermes-webhook.secret
+chmod 600 ~/.config/hermes-codex-bridge/hermes-webhook.secret
 ```
 
 채널 매핑 예시:
 
 ```bash
-cat > ~/.config/hermes-omx-bridge/project-channels.json <<'JSON'
+cat > ~/.config/hermes-codex-bridge/project-channels.json <<'JSON'
 {
   "default": "<fallback-discord-channel-id>",
   "projects": {
@@ -97,17 +97,17 @@ cat > ~/.config/hermes-omx-bridge/project-channels.json <<'JSON'
   }
 }
 JSON
-chmod 600 ~/.config/hermes-omx-bridge/project-channels.json
+chmod 600 ~/.config/hermes-codex-bridge/project-channels.json
 ```
 
 bridge env에 Hermes sink를 켭니다.
 
 ```env
 BRIDGE_HERMES_WEBHOOK_ENABLED=true
-BRIDGE_HERMES_WEBHOOK_URL=http://127.0.0.1:8644/webhooks/omx-bridge
+BRIDGE_HERMES_WEBHOOK_URL=http://127.0.0.1:8644/webhooks/codex-bridge
 BRIDGE_HERMES_WEBHOOK_SECRET=<same secret>
 BRIDGE_HERMES_DEFAULT_CHANNEL_ID=<fallback-discord-channel-id>
-BRIDGE_HERMES_PROJECT_CHANNEL_MAP=~/.config/hermes-omx-bridge/project-channels.json
+BRIDGE_HERMES_PROJECT_CHANNEL_MAP=~/.config/hermes-codex-bridge/project-channels.json
 BRIDGE_HERMES_CONFIG=~/.hermes/config.yaml
 BRIDGE_HERMES_ALLOWLIST=true
 BRIDGE_HERMES_RESTART=true
@@ -130,13 +130,13 @@ Hermes webhook subscription은 `scripts/install-hermes-stack.sh`가 만드는 `s
 scripts/install-hermes-stack.sh --webhook --restart --non-interactive
 ```
 
-수동 `hermes webhook subscribe`가 필요하면 `scripts/install-hermes-stack.sh`의 `subscription_prompt` 내용을 그대로 사용하고, 문서에 오래된 prompt 사본을 새로 만들지 마세요. 현재 subscription은 `hermes-omx-bridge,omx-new,omx-send,omx-kill` 네 skill을 함께 로드하며, prompt에는 `CommandSubmitted`/`User Command` 원문 알림, 기본 `direct` FinalAnswer fullText, 선택 `summary`, 긴 `FinalAnswer` 분할 시 첫 조각만 제목을 표시하고 모든 조각 끝에 `(i/N)`을 붙이는 규칙, bridge-owned direct chunk 전송, `원문 그대로` 예외, Discord-originated dispatch의 `omx-send --discord-approval` + Hermes `clarify` 승인 카드 gate, 그리고 생성/전달/종료 intent를 각각 `omx-new`, `omx-send`, `omx-kill`로 넘기는 경계 규칙이 포함됩니다. `--discord-approval`은 bridge pending state만 만들므로 Hermes가 `clarify`/AskUserQuestion을 호출해야 실제 Discord 전송/거절/추가수정 버튼이 보입니다. `omx-send` 전달 프롬프트의 routing metadata/payload instruction 분리와 의미 보존형 실행 지시 정제 규칙은 `skills/omx-send/SKILL.md`가 소유합니다. `/new`/`/resume`은 Hermes/Gateway 라우팅 명령으로 `omx-new`에 매핑하지 않고, 기존 OMX/Codex pane에 보내는 Codex slash command라면 원문 그대로 전달합니다.
+수동 `hermes webhook subscribe`가 필요하면 `scripts/install-hermes-stack.sh`의 `subscription_prompt` 내용을 그대로 사용하고, 문서에 오래된 prompt 사본을 새로 만들지 마세요. 현재 subscription은 `hermes-codex-bridge,codex-new,codex-send,codex-kill` 네 skill을 함께 로드하며, prompt에는 `CommandSubmitted`/`User Command` 원문 알림, 기본 `direct` FinalAnswer fullText, 선택 `summary`, 긴 `FinalAnswer` 분할 시 첫 조각만 제목을 표시하고 모든 조각 끝에 `(i/N)`을 붙이는 규칙, bridge-owned direct chunk 전송, `원문 그대로` 예외, Discord-originated dispatch의 `codex-send --discord-approval` + Hermes `clarify` 승인 카드 gate, 그리고 생성/전달/종료 intent를 각각 `codex-new`, `codex-send`, `codex-kill`로 넘기는 경계 규칙이 포함됩니다. `--discord-approval`은 bridge pending state만 만들므로 Hermes가 `clarify`/AskUserQuestion을 호출해야 실제 Discord 전송/거절/추가수정 버튼이 보입니다. `codex-send` 전달 프롬프트의 routing metadata/payload instruction 분리와 의미 보존형 실행 지시 정제 규칙은 `skills/codex-send/SKILL.md`가 소유합니다. `/new`/`/resume`은 Hermes/Gateway 라우팅 명령으로 `codex-new`에 매핑하지 않고, 기존 Codex pane에 보내는 Codex slash command라면 원문 그대로 전달합니다.
 
 서비스 재시작:
 
 ```bash
 systemctl --user restart hermes-gateway.service
-systemctl --user restart hermes-omx-bridge.service
+systemctl --user restart hermes-codex-bridge.service
 ```
 
 확인:
@@ -162,7 +162,7 @@ Discord bot token/guild id가 bridge에 `BRIDGE_DISCORD_BOT_TOKEN`/`BRIDGE_DISCO
 그 다음 Hermes에게 이렇게 지시합니다.
 
 ```text
-project-a 프로젝트를 omx-new로 새 세션 시작해서 감시해줘.
+project-a 프로젝트를 codex-new로 새 세션 시작해서 감시해줘.
 프로젝트명 텍스트 채널을 미리 만들어뒀으니 #project-a를 찾아 bridge에 매핑 등록하고, 이후 알림은 그 채널로 보내줘.
 ```
 
@@ -174,14 +174,14 @@ project-a 프로젝트를 omx-new로 새 세션 시작해서 감시해줘.
 새 프로젝트 세션 시작:
 
 ```text
-현재 작업 프로젝트를 omx-new로 시작해서 감시해줘.
+현재 작업 프로젝트를 codex-new로 시작해서 감시해줘.
 프로젝트명 텍스트 채널이 있으면 매핑 등록하고, 없으면 bridge 자동 생성/매핑을 시도한 뒤 이후 알림은 그 채널로 요약해줘.
 ```
 
 이미 떠 있는 세션 확인:
 
 ```text
-hermes-omx-bridge로 bridge health와 sessions를 확인해줘.
+hermes-codex-bridge로 bridge health와 sessions를 확인해줘.
 ```
 
 특정 세션에 후속 지시:
@@ -193,7 +193,7 @@ hermes-omx-bridge로 bridge health와 sessions를 확인해줘.
 team/tmux visible session에 지시:
 
 ```text
-해당 omx team 세션에는 tmux visible mode로 다음 지시를 넣어줘: worker 상태를 확인하고 다음 단계 진행.
+해당 codex team 세션에는 tmux visible mode로 다음 지시를 넣어줘: worker 상태를 확인하고 다음 단계 진행.
 ```
 
 ## 6. Smoke check
@@ -221,7 +221,7 @@ curl -sS -X POST "http://127.0.0.1:3037/sessions/$SESSION_ID/question-answers" \
 
 - bridge health가 `{ "ok": true }`.
 - Hermes webhook health가 `{ "status": "ok", "platform": "webhook" }`.
-- `/sessions`에 Codex/OMX session이 보임.
+- `/sessions`에 Codex session이 보임.
 - dry-run command가 `202`와 `delivery.dryRun: true`를 반환.
 - structured question 등록이 `202`와 `answer_endpoint`를 반환.
 - structured question answer가 `202`와 `delivery.status: "queued"`를 반환.

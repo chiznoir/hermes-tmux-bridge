@@ -7,21 +7,21 @@ function hasExplicitThreadName(session = {}, options = {}) {
 }
 
 function hasHumanSessionThreadName(session = {}) {
-  return Boolean(String(session.tmuxId || session.omxSessionId || session.session_id || session.lifecycleOwner || '').trim());
+  return Boolean(String(session.tmuxId || session.lifecycleSessionId || session.session_id || session.lifecycleOwner || '').trim());
 }
 
 function shouldCreateThreadForSession(session = null, options = {}) {
   if (!session || Object.keys(session).length === 0) return true;
   if (session.isAuxiliaryCodexLog === true) return false;
-  if (session.hasOmxLifecycle === false) return options.createMissingDiscordThreadForCodexOnly === true;
+  if (session.hasBridgeLifecycle === false) return options.createMissingDiscordThreadForCodexOnly === true;
   if (hasExplicitThreadName(session, options)) return true;
-  const omxSessionId = session.omxSessionId || session.session_id;
+  const lifecycleSessionId = session.lifecycleSessionId || session.session_id;
   const codexSessionId = session.codexSessionId || session.codex_session_id || session.threadId || session.thread_id;
-  if (session.hasOmxLifecycle === true && omxSessionId && codexSessionId && omxSessionId === codexSessionId && !session.lifecycleOwner) {
+  if (session.hasBridgeLifecycle === true && lifecycleSessionId && codexSessionId && lifecycleSessionId === codexSessionId && !session.lifecycleOwner) {
     return false;
   }
   const bridgeSessionId = session.bridgeSessionId || session.bridge_session_id;
-  const candidate = session.tmuxId || omxSessionId || bridgeSessionId || codexSessionId || session.tmuxPaneId;
+  const candidate = session.tmuxId || lifecycleSessionId || bridgeSessionId || codexSessionId || session.tmuxPaneId;
   if (!hasHumanSessionThreadName(session) && isRawSessionId(candidate)) {
     return false;
   }

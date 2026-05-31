@@ -9,7 +9,7 @@ import { join } from 'node:path';
 const execFile = promisify(execFileCallback);
 
 async function tempEnv() {
-  const home = await mkdtemp(join(tmpdir(), 'hermes-omx-bridge-install-'));
+  const home = await mkdtemp(join(tmpdir(), 'hermes-codex-bridge-install-'));
   return {
     ...process.env,
     HOME: home,
@@ -141,31 +141,31 @@ test('bin/install.sh installs only core bridge helper symlinks', async () => {
     '--force',
   ], { env, maxBuffer: 1024 * 1024 });
 
-  assert.match(stdout, /Installed symlink: .*omx-new/);
-  assert.match(stdout, /Installed symlink: .*omx-send/);
-  assert.match(stdout, /Installed symlink: .*omx-kill/);
-  assert.doesNotMatch(stdout, /omx-bootstrap|omx-status|omx-sync|omx-cleanup/);
-  assert.equal(await readlink(join(targetDir, 'omx-new')), join(process.cwd(), 'bin', 'omx-new'));
-  assert.equal(await readlink(join(targetDir, 'omx-send')), join(process.cwd(), 'bin', 'omx-send'));
-  assert.equal(await readlink(join(targetDir, 'omx-kill')), join(process.cwd(), 'bin', 'omx-kill'));
+  assert.match(stdout, /Installed symlink: .*codex-new/);
+  assert.match(stdout, /Installed symlink: .*codex-send/);
+  assert.match(stdout, /Installed symlink: .*codex-kill/);
+  assert.doesNotMatch(stdout, /codex-bootstrap|codex-status|codex-sync|codex-cleanup/);
+  assert.equal(await readlink(join(targetDir, 'codex-new')), join(process.cwd(), 'bin', 'codex-new'));
+  assert.equal(await readlink(join(targetDir, 'codex-send')), join(process.cwd(), 'bin', 'codex-send'));
+  assert.equal(await readlink(join(targetDir, 'codex-kill')), join(process.cwd(), 'bin', 'codex-kill'));
 });
 
-test('install-omx-cli installs bridge helper symlinks', async () => {
+test('install-codex-cli installs bridge helper symlinks', async () => {
   const env = await tempEnv();
   const targetDir = join(env.HOME, 'bin');
   const { stdout } = await execFile('bash', [
-    'scripts/install-omx-cli.sh',
+    'scripts/install-codex-cli.sh',
     '--repo-root', process.cwd(),
     '--dir', targetDir,
     '--force',
   ], { env, maxBuffer: 1024 * 1024 });
 
-  assert.match(stdout, /Installed symlink: .*omx-new/);
-  assert.match(stdout, /Installed symlink: .*omx-send/);
-  assert.match(stdout, /Installed symlink: .*omx-kill/);
-  assert.equal(await readlink(join(targetDir, 'omx-new')), join(process.cwd(), 'bin', 'omx-new'));
-  assert.equal(await readlink(join(targetDir, 'omx-send')), join(process.cwd(), 'bin', 'omx-send'));
-  assert.equal(await readlink(join(targetDir, 'omx-kill')), join(process.cwd(), 'bin', 'omx-kill'));
+  assert.match(stdout, /Installed symlink: .*codex-new/);
+  assert.match(stdout, /Installed symlink: .*codex-send/);
+  assert.match(stdout, /Installed symlink: .*codex-kill/);
+  assert.equal(await readlink(join(targetDir, 'codex-new')), join(process.cwd(), 'bin', 'codex-new'));
+  assert.equal(await readlink(join(targetDir, 'codex-send')), join(process.cwd(), 'bin', 'codex-send'));
+  assert.equal(await readlink(join(targetDir, 'codex-kill')), join(process.cwd(), 'bin', 'codex-kill'));
 });
 
 test('apply-runtime dry-run shows the user service restart and health check plan', async () => {
@@ -197,7 +197,7 @@ test('apply-runtime can target a system service and skip health checks', async (
   assert.match(stdout, /scope: system/);
   assert.match(stdout, /health: skipped/);
   assert.match(stdout, /\+ systemctl daemon-reload/);
-  assert.match(stdout, /\+ systemctl restart hermes-omx-bridge\.service/);
+  assert.match(stdout, /\+ systemctl restart hermes-codex-bridge\.service/);
   assert.doesNotMatch(stdout, /\+ curl/);
 });
 
@@ -211,11 +211,11 @@ test('install-hermes-stack defaults to Hermes agent bridge without webhook sink'
     '--repo-root', process.cwd(),
   ], { env, maxBuffer: 1024 * 1024 });
 
-  assert.match(stdout, /install-omx-cli\.sh/);
+  assert.match(stdout, /install-codex-cli\.sh/);
   assert.match(stdout, /--force/);
   assert.match(stdout, /Mode: Hermes agent bridge/);
   assert.match(stdout, /Helper CLIs:/);
-  assert.match(stdout, /remove Hermes webhook subscription omx-bridge/);
+  assert.match(stdout, /remove Hermes webhook subscription codex-bridge/);
   assert.doesNotMatch(stdout, /--sink(?:\s|$)/);
   assert.doesNotMatch(stdout, /install\/update Hermes webhook subscription/);
 });
@@ -233,7 +233,7 @@ test('install-hermes-stack only enables webhook sink when explicitly requested',
   ], { env, maxBuffer: 1024 * 1024 });
 
   assert.match(stdout, /--sink(?:\s|$)/);
-  assert.match(stdout, /install\/update Hermes webhook subscription omx-bridge/);
+  assert.match(stdout, /install\/update Hermes webhook subscription codex-bridge/);
   assert.match(stdout, /Mode: Hermes webhook sink/);
 });
 
@@ -292,10 +292,10 @@ test('core worktree does not expose extension helper scripts', async () => {
   assert.equal(pkg.scripts.start, 'node src/server.js');
 
   const binReadme = await readFile(join(process.cwd(), 'bin', 'README.md'), 'utf8');
-  assert.match(binReadme, /omx-new/);
-  assert.match(binReadme, /omx-send/);
-  assert.match(binReadme, /omx-kill/);
-  for (const removed of ['bootstrap', 'status', 'sync', 'cleanup'].map((name) => `omx-${name}`)) {
+  assert.match(binReadme, /codex-new/);
+  assert.match(binReadme, /codex-send/);
+  assert.match(binReadme, /codex-kill/);
+  for (const removed of ['bootstrap', 'status', 'sync', 'cleanup'].map((name) => `codex-${name}`)) {
     assert.equal(binReadme.includes(removed), false);
   }
 });

@@ -64,8 +64,7 @@ function statePath(projectRoot = process.cwd(), options = {}) {
   return process.env.BRIDGE_HERMES_WEBHOOK_STATE_PATH
     || (process.env.BRIDGE_STATE_ROOT || options.bridgeStateRoot
       ? bridgeStatePath('bridge-hermes-webhook-sink.json', options)
-      : null)
-    || join(projectRoot, '.omx', 'state', 'bridge-hermes-webhook-sink.json');
+      : join(projectRoot, '.codex', 'state', 'bridge-hermes-webhook-sink.json'));
 }
 
 async function readState(path) {
@@ -144,22 +143,22 @@ function suppressTeamWorkerNotifications(options = {}) {
 }
 
 function shouldPollSession(session = {}, options = {}) {
-  if (session.kind === 'omx-team' && suppressTeamWorkerNotifications(options)) return false;
-  if (session.isAuxiliaryCodexLog === true && session.hasOmxLifecycle !== true) return false;
+  if (session.kind === 'codex-team' && suppressTeamWorkerNotifications(options)) return false;
+  if (session.isAuxiliaryCodexLog === true && session.hasBridgeLifecycle !== true) return false;
   if (isNativeOnlyLifecyclePollution(session)) return false;
-  if (session.hasOmxLifecycle === false && options.allowCodexOnlySessionMonitoring !== true) return false;
+  if (session.hasBridgeLifecycle === false && options.allowCodexOnlySessionMonitoring !== true) return false;
   if (options.allowUnmappedCodexLogNotifications === true || includeUnmappedCodexLogs(options)) return true;
-  return session.hasOmxLifecycle !== false;
+  return session.hasBridgeLifecycle !== false;
 }
 
 function isNativeOnlyLifecyclePollution(session = {}) {
   if (session.lifecycleOwner) return false;
-  const omxSessionId = session.omxSessionId || session.session_id;
+  const lifecycleSessionId = session.lifecycleSessionId || session.session_id;
   const codexSessionId = session.codexSessionId || session.codex_session_id || session.threadId || session.thread_id;
-  return session.hasOmxLifecycle === true
-    && omxSessionId
+  return session.hasBridgeLifecycle === true
+    && lifecycleSessionId
     && codexSessionId
-    && omxSessionId === codexSessionId;
+    && lifecycleSessionId === codexSessionId;
 }
 
 function suppressAskPermissionForSession(session = {}, options = {}) {
@@ -371,7 +370,7 @@ export function hermesPayloadNotificationChunks(payload = {}, options = {}) {
 
 function sessionIdFor(session = {}) {
   return session.bridgeSessionId
-    || session.omxSessionId
+    || session.lifecycleSessionId
     || session.codexThreadId
     || session.codexSessionId
     || session.threadId
@@ -387,7 +386,7 @@ export function sessionContextLine(session = {}) {
   return [
     `**session:** ${inlineCode(sessionIdFor(session))}`,
     [
-      `**tmux:** ${inlineCode(session.tmuxId || session.tmuxPaneId || session.omxSessionId || session.bridgeSessionId)}`,
+      `**tmux:** ${inlineCode(session.tmuxId || session.tmuxPaneId || session.lifecycleSessionId || session.bridgeSessionId)}`,
       `**project:** ${inlineCode(session.project || 'unknown')}`,
     ].join(' | '),
   ].join('\n');
@@ -434,7 +433,7 @@ function approvalCommands(event = {}) {
 
 function compactComponentId(...parts) {
   const digest = createHash('sha256').update(parts.filter(Boolean).join(':')).digest('base64url').slice(0, 18);
-  return `omx:${digest}`;
+  return `codex:${digest}`;
 }
 
 function approvalActionId(command) {
@@ -569,7 +568,7 @@ export function eventToHermesPayload(session = {}, event = {}, options = {}) {
     bridge_url: options.bridgeUrl || bridgeUrlFromEnv(),
     bridge_session_id: session.bridgeSessionId || null,
     session_id: sessionIdFor(session) || null,
-    omx_session_id: session.omxSessionId || null,
+    lifecycle_session_id: session.lifecycleSessionId || null,
     codex_session_id: session.codexSessionId || null,
     thread_id: session.codexThreadId || session.threadId || session.codexSessionId || null,
     discord_thread_id: options.discordThreadId || null,
@@ -966,7 +965,7 @@ export async function pollHermesWebhookNotifications(options = {}) {
     for (const session of sessions) {
       const routedEvents = await routeSessionEvents(session, {
         ...options,
-        projectRoot: session.omxProjectRoot || projectRoot,
+        projectRoot: session.lifecycleRoot || projectRoot,
         bridgeProjectRoot: projectRoot,
       });
       const cursorFilteredEvents = filterEventsByCodexLogCursor(index.db, session, routedEvents, cursorOptions);
@@ -1093,7 +1092,7 @@ export async function pollHermesWebhookNotifications(options = {}) {
             timestamp: event.timestamp,
           },
           session: {
-            sessionId: session.omxSessionId || session.bridgeSessionId || session.codexSessionId || session.threadId || null,
+            sessionId: session.lifecycleSessionId || session.bridgeSessionId || session.codexSessionId || session.threadId || null,
             codexSessionId: session.codexSessionId || null,
             tmuxId: session.tmuxId || null,
             project: session.project || null,
