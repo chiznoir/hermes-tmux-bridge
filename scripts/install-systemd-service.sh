@@ -21,7 +21,7 @@ Options:
   --port PORT             HTTP port (default: 3037)
   --project-root PATH     Optional fixed OMX project root to scan
   --repo-root PATH        Bridge repository root (default: parent of scripts/)
-  --state-root PATH       Bridge-owned state/log/cache root
+  --state-root PATH       Bridge state/log/cache root
   --token TOKEN           Bearer token for bridge API (optional for 127.0.0.1)
   --token-file PATH       Read Bearer token from first line of file
   --notify                Enable bridge Discord notifier (default: disabled)

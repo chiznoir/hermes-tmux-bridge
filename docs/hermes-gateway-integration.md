@@ -69,13 +69,13 @@ OMX_BRIDGE_URL=http://127.0.0.1:3037
 # OMX_BRIDGE_TOKEN=<bridge token>
 ```
 
-Hermes webhook subscription은 `scripts/install-hermes-stack.sh`의 `subscription_prompt`를 SSoT로 설치합니다. 공개 문서에는 prompt 전문을 중복 복사하지 않습니다.
+Hermes webhook subscription은 `scripts/install-hermes-stack.sh`의 `subscription_prompt`로 설치합니다.
 
 ```bash
 scripts/install-hermes-stack.sh --webhook --restart --non-interactive
 ```
 
-수동 `hermes webhook subscribe`가 필요하면 `scripts/install-hermes-stack.sh`의 `subscription_prompt` 내용을 그대로 사용하고, 문서에 오래된 prompt 사본을 새로 만들지 마세요. 현재 subscription은 `hermes-omx-notify,omx-new,omx-send,omx-kill` 네 skill을 함께 로드하며, prompt에는 `CommandSubmitted`/`User Command` 원문 알림, `FinalAnswer` 요약/direct 전달, 긴 `FinalAnswer` 분할 시 첫 조각만 제목을 표시하고 모든 조각 끝에 `(i/N)`을 붙이는 규칙, `원문 그대로` 예외, Discord-originated dispatch의 `omx-send --discord-approval` + Hermes `clarify` 승인 카드 gate, 그리고 생성/전달/종료 intent를 각각 `omx-new`, `omx-send`, `omx-kill`로 넘기는 경계 규칙이 포함됩니다. `omx-send` 전달 프롬프트의 routing metadata/payload instruction 분리와 의미 보존형 실행 지시 정제 규칙은 `skills/omx-send/SKILL.md`가 소유합니다.
+수동 `hermes webhook subscribe`가 필요하면 `scripts/install-hermes-stack.sh`의 현재 `subscription_prompt` 내용을 사용하세요. 현재 subscription은 `hermes-omx-notify,omx-new,omx-send,omx-kill` 네 skill을 함께 로드하며, prompt에는 `CommandSubmitted`/`User Command` 원문 알림, `FinalAnswer` 요약/direct 전달, 긴 `FinalAnswer` 분할 시 첫 조각만 제목을 표시하고 모든 조각 끝에 `(i/N)`을 붙이는 규칙, `원문 그대로` 예외, Discord-originated dispatch의 `omx-send --discord-approval` + Hermes `clarify` 승인 카드 gate, 그리고 생성/전달/종료 intent를 각각 `omx-new`, `omx-send`, `omx-kill`로 넘기는 경계 규칙이 포함됩니다. `omx-send` 전달 프롬프트의 routing metadata/payload instruction 분리와 의미 보존형 실행 지시 정제 규칙은 `skills/omx-send/SKILL.md`에 정리되어 있습니다.
 
 ## Project channel map
 
@@ -91,7 +91,7 @@ scripts/install-hermes-stack.sh --webhook --restart --non-interactive
 - 매핑이 있으면 해당 채널 사용.
 - 매핑이 없으면 bridge가 `BRIDGE_DISCORD_BOT_TOKEN`/`BRIDGE_DISCORD_GUILD_ID`로 `desired_channel_name` 기존 채널을 찾고, 없으면 권한이 허용될 때 생성/매핑한다.
 - 프로젝트 채널 자동 생성/자동 매핑은 bridge 기본 동작이다. `scripts/install-hermes-stack.sh`는 Hermes `~/.hermes/.env`의 `DISCORD_BOT_TOKEN`과 `DISCORD_HOME_CHANNEL`/fallback channel에서 이 값을 자동 매핑한다. 끄려면 `BRIDGE_HERMES_AUTO_CREATE_CHANNELS=false`.
-- Hermes Gateway Discord allowlist 자동 반영은 `BRIDGE_HERMES_CONFIG`, `BRIDGE_HERMES_ALLOWLIST`, `BRIDGE_HERMES_RESTART`, `BRIDGE_HERMES_RESTART_CMD`가 소유한다. bridge는 `config.yaml`의 긴 scalar allowlist가 YAML continuation line으로 접혀도 전체 값을 검사한다. 이미 등록된 project channel은 no-op이어야 하며 Gateway restart를 실행하지 않는다. Session thread는 parent/project channel allowlist를 사용하므로 thread ID를 별도 allowlist 항목으로 추가하지 않는다.
+- Hermes Gateway Discord allowlist 자동 반영은 `BRIDGE_HERMES_CONFIG`, `BRIDGE_HERMES_ALLOWLIST`, `BRIDGE_HERMES_RESTART`, `BRIDGE_HERMES_RESTART_CMD` 설정을 사용한다. bridge는 `config.yaml`의 긴 scalar allowlist가 YAML continuation line으로 접혀도 전체 값을 검사한다. 이미 등록된 project channel은 no-op이어야 하며 Gateway restart를 실행하지 않는다. Session thread는 parent/project channel allowlist를 사용하므로 thread ID를 별도 allowlist 항목으로 추가하지 않는다.
 - 브랜치는 채널명에 넣지 않고 메시지 메타로 표시하는 것을 권장.
 
 ## 설치 명령 요약
@@ -157,9 +157,9 @@ Helper CLI는 이 repository의 `bin/` 기준입니다. `scripts/install-hermes-
 
 `AskPermission` payload에는 `approval_actions`, `component_actions`, `discord_components`가 포함될 수 있습니다. Hermes Gateway가 Discord component interaction을 지원하면 `/approve`, `/deny`, `/approve session`, `/approve always`를 버튼으로 렌더링하고, 클릭 시 해당 action의 `endpoint`와 `body`를 그대로 bridge에 전달합니다. `/approve always`는 danger 스타일 또는 2차 확인을 권장합니다.
 
-`omx-send --discord-approval`은 `POST /sessions/:id/commands`에 `approvalGate: "discord-hermes-omx-send"`를 붙입니다. bridge는 tmux dispatch 전에 `kind: "omx-send-approval"` structured question을 등록하고 `202 approval-pending`과 `component_actions`/`discord_components`를 반환합니다. 이 JSON은 bridge/API contract일 뿐 Hermes Gateway가 terminal-tool 결과에서 자동으로 버튼을 렌더링하지 않습니다. Hermes agent가 `clarify`/AskUserQuestion을 호출해야 Discord native 카드가 뜹니다. 선택 후 Hermes는 `omx-send --session <id> --answer-approval send|reject --question-id <questionId>` 또는 추가수정 재정제를 사용해 `/sessions/:id/question-answers`에 제출합니다. 전송은 bridge decision log의 `send_claimed` marker 후 exact-once로 dispatch되며, 거절/추가수정은 tmux로 보내지지 않습니다.
+`omx-send --discord-approval`은 `POST /sessions/:id/commands`에 `approvalGate: "discord-hermes-omx-send"`를 붙입니다. bridge는 tmux dispatch 전에 `kind: "omx-send-approval"` structured question을 등록하고 `202 approval-pending`과 `component_actions`/`discord_components`를 반환합니다. 이 JSON은 bridge/API 응답이며 Hermes Gateway가 terminal-tool 결과에서 자동으로 버튼을 렌더링하지 않습니다. Hermes agent가 `clarify`/AskUserQuestion을 호출해야 Discord native 카드가 뜹니다. 선택 후 Hermes는 `omx-send --session <id> --answer-approval send|reject --question-id <questionId>` 또는 추가수정 재정제를 사용해 `/sessions/:id/question-answers`에 제출합니다. 전송은 bridge decision log의 `send_claimed` marker 후 exact-once로 dispatch되며, 거절/추가수정은 tmux로 보내지지 않습니다.
 
-Deep Interview 같은 구조화 질문은 tmux 방향키 대신 bridge structured question/answer endpoints를 사용합니다. 먼저 bridge/OMX 쪽 canonical question을 등록한 뒤 answer를 제출해야 합니다.
+Deep Interview 같은 구조화 질문은 tmux 방향키 대신 bridge structured question/answer endpoints를 사용합니다. 먼저 bridge/OMX 쪽 question을 등록한 뒤 answer를 제출해야 합니다.
 
 ```http
 POST /sessions/:id/questions

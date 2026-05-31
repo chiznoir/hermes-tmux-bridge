@@ -17,7 +17,7 @@ metadata:
 
 # OMX Kill
 
-This skill owns existing-session termination. Use `omx-kill` to terminate the tmux session associated with a bridge session. This replaces legacy `cwt-kill`.
+Use this skill for existing-session termination. Use `omx-kill` to terminate the tmux session associated with a bridge session. This replaces legacy `cwt-kill`.
 
 ## Boundary
 

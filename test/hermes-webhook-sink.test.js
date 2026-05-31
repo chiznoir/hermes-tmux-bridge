@@ -426,7 +426,7 @@ test('operations docs identify runtime Hermes rule injection surfaces', async ()
     'skills/hermes-omx-notify/SKILL.md',
     'src/hermes-webhook-sink.js',
     'src/server.js',
-    'OMX-owned lifecycle',
+    'OMX lifecycle',
   ]) {
     assert.match(operationsSource, new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
@@ -466,10 +466,10 @@ test('Hermes command dispatch rules rely on User Command events and meaning-pres
   assert.match(promptSource, /skills\/omx-send\/SKILL\.md/);
 
   assert.match(operationsSource, /skills\/omx-send\/SKILL\.md/);
-  assert.match(operationsSource, /prompt refinement SSoT/);
+  assert.match(operationsSource, /skills\/omx-send\/SKILL\.md.*의미 보존/s);
 
   for (const source of [skillSource]) {
-    assert.match(source, /SSoT/);
+    assert.match(source, /Prompt refinement before `omx-send`/);
     assert.match(source, /대상 세션 식별\/routing metadata|대상 세션\/routing metadata|target session\/routing metadata/);
     assert.match(source, /실제 전달할 사용자 지시|실제 전달 지시|actual user instruction/);
     assert.match(source, /의미 보존형 작업 지시문|meaning-preserving executable instruction/);
@@ -532,8 +532,8 @@ test('Hermes command dispatch rules rely on User Command events and meaning-pres
   }
 
   for (const docSource of [quickstartSource, integrationSource]) {
-    assert.match(docSource, /subscription_prompt.*SSoT/);
-    assert.match(docSource, /prompt 전문.*복사하지|오래된 prompt 사본|Do not copy the full prompt|stale prompt copy/);
+    assert.match(docSource, /subscription_prompt.*scripts\/install-hermes-stack\.sh|scripts\/install-hermes-stack\.sh.*subscription_prompt/);
+    assert.match(docSource, /current `subscription_prompt`|현재 `subscription_prompt`/);
     assert.match(docSource, /CommandSubmitted/);
     assert.match(docSource, /User Command/);
     assert.match(docSource, /FinalAnswer/);
@@ -575,7 +575,7 @@ test('Hermes prompt separates routing metadata from delivered payload instructio
   const operationsSource = await readFile(join(process.cwd(), 'docs', 'operations.md'), 'utf8');
 
   assert.match(operationsSource, /skills\/omx-send\/SKILL\.md/);
-  assert.match(operationsSource, /prompt refinement SSoT/);
+  assert.match(operationsSource, /skills\/omx-send\/SKILL\.md.*의미 보존/s);
 
   for (const source of [skillSource]) {
     assert.match(source, /1[.)]\s*대상 세션(?: 식별)?\/routing metadata.*2[.)]\s*실제 전달(?:할 사용자)? 지시.*3[.)]\s*의미 보존형 작업 지시문.*4[.)]\s*확장.*왜곡 차단/s);

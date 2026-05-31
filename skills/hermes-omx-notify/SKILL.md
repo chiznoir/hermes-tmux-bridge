@@ -1,6 +1,6 @@
 ---
 name: hermes-omx-notify
-description: Use the local hermes-omx-notify read API to inspect bridge health, session lists, session state, latest idle/final answer text, events, interactions, and bridge-owned Discord notification payloads. Do not own session creation, prompt dispatch, or termination; hand those intents to omx-new, omx-send, or omx-kill.
+description: Use the local hermes-omx-notify read API to inspect bridge health, session lists, session state, latest idle/final answer text, events, interactions, and bridge Discord notification payloads. For session creation, prompt dispatch, or termination, hand those intents to omx-new, omx-send, or omx-kill.
 version: 0.2.0
 author: Hermes Agent + oh-my-codex
 license: MIT
@@ -25,7 +25,7 @@ metadata:
 
 # Hermes OMX Bridge
 
-This is the bridge operations and read-API skill. It teaches Hermes how to read the `hermes-omx-notify` control plane, interpret bridge-owned event payloads, and render bridge notifications. It is not the owner of session lifecycle mutations.
+This is the bridge operations and read-API skill. It teaches Hermes how to read the `hermes-omx-notify` control plane, interpret bridge event payloads, and render bridge notifications. It is not the owner of session lifecycle mutations.
 
 ## Responsibility Boundary
 
@@ -34,7 +34,7 @@ This is the bridge operations and read-API skill. It teaches Hermes how to read 
 - `omx-send`: send/refine a follow-up instruction or approval/denial into an existing session.
 - `omx-kill`: stop/kill/close an existing OMX/Codex session.
 
-When a user intent is lifecycle or dispatch, load and follow the dedicated skill. Do not duplicate its command rules here. This avoids two canonical prompt-refinement or lifecycle policies.
+When a user intent is lifecycle or dispatch, load and follow the dedicated skill. Do not duplicate its command rules here. This avoids duplicate prompt-refinement or lifecycle rules.
 
 ## Intent Handoff
 
@@ -74,7 +74,7 @@ curl -fsS "$OMX_BRIDGE_URL/sessions/$SESSION_ID/events"
 curl -fsS "$OMX_BRIDGE_URL/sessions/$SESSION_ID/interactions"
 ```
 
-Prefer the bridge read API over raw tmux capture for canonical status/history. Use raw tmux capture only as explicitly reported diagnostic evidence when the bridge endpoint is unavailable.
+Prefer the bridge read API over raw tmux capture for status/history. Use raw tmux capture only as explicitly reported diagnostic evidence when the bridge endpoint is unavailable.
 
 ## Hermes Webhook Sink Mode
 
@@ -99,7 +99,7 @@ When a long `FinalAnswer` / `Session Idle` alert is split as a continued notific
 
 For “원문 그대로”, “raw”, “full text”, or “latest idle 원문”:
 
-- Fetch canonical text from `GET /sessions/:id/idle/latest` and use `fullText`.
+- Fetch text from `GET /sessions/:id/idle/latest` and use `fullText`.
 - Do not reconstruct from `payload.message_markdown`, `payload.text_preview`, notification snippets, Discord history, or tmux capture.
 - Do not summarize, paraphrase, reorder, or wrap the full markdown in an extra triple-backtick block.
 - If splitting is required outside bridge-prepared payloads, preserve markdown fences and send every split message to the same Discord target with `(i/N)` markers and a 1800-character ceiling.
@@ -113,11 +113,11 @@ For bridge-registered structured questions, prefer native Discord components ove
 - `multi-answerable`: multi-select menu.
 - `allow_other: true`: `직접 입력` / `Other` modal with `other_text`.
 
-Submit answers only to the canonical bridge question endpoint returned by the payload. Do not invent option values from rendered markdown. If structured answer submission returns `delivery.status: "queued"`, report it as queued for the question renderer, not final completion.
+Submit answers only to the bridge question endpoint returned by the payload. Do not invent option values from rendered markdown. If structured answer submission returns `delivery.status: "queued"`, report it as queued for the question renderer, not final completion.
 
 ## Safety
 
 - Do not mutate bridge state with hand-written terminal `curl` unless no supported helper/API surface exists and the user explicitly accepts that fallback.
-- Do not use raw tmux capture as canonical truth when bridge endpoints are available.
+- Do not use raw tmux capture when bridge endpoints are available.
 - Do not choose a different same-project session when a reply contains `bridge_session_id`, `session:`, `tmux:`, or `discord_thread_id` metadata.
-- Do not keep a second copy of `omx-send` prompt refinement rules here; `skills/omx-send/SKILL.md` owns dispatch prompt refinement.
+- Do not keep a second copy of `omx-send` prompt refinement rules here; dispatch prompt refinement is described in `skills/omx-send/SKILL.md`.

@@ -21,7 +21,7 @@ metadata:
 
 # OMX Send
 
-This dispatch-specific skill exists because Hermes may load `omx-send` directly when the user names that skill or replies to a session notification. `hermes-omx-notify` owns bridge read/status/rendering; this file owns the critical dispatch contract so direct `skill_view("omx-send")` does not bypass prompt refinement.
+This dispatch-specific skill exists because Hermes may load `omx-send` directly when the user names that skill or replies to a session notification. `hermes-omx-notify` handles bridge read/status/rendering; this file describes the dispatch rules so direct `skill_view("omx-send")` does not bypass prompt refinement.
 
 Use `omx-send` to dispatch commands through hermes-omx-notify. Do not hand-build raw bridge `curl` calls. Do not silently fall back to raw tmux paste; if bridge delivery fails, report the explicit failure unless the user explicitly asked for visible tmux/manual fallback.
 
@@ -36,7 +36,7 @@ For Discord-originated Hermes replies that dispatch a refined prompt into an exi
 - Typical routing labels/operators include `bridge_session_id`, `tmux id`, `bridge session id`, Korean phrases like `이 세션에 전달해`, an explicit session name such as `세션명은 X`, and `X 세션에 넣어`; these are not prompt content and must be removed from the delivered work sentence.
 - Remove routing metadata from the prompt sent to Codex; 프롬프트 본문에 넣지 말고 작업 문장에서는 제거한다.
 
-## Prompt refinement SSoT before `omx-send`
+## Prompt refinement before `omx-send`
 
 The exact argument passed to `omx-send` MUST already be the refined prompt. Do not pass the raw Discord reply, raw `[Replying to: ...]` wrapper, or raw operator command and expect Codex to infer the real task.
 

@@ -87,7 +87,7 @@ BRIDGE_HERMES_RESTART_CMD=systemctl --user restart --no-block hermes-gateway.ser
 
 ## 3. Helper CLI만 수동 설치
 
-전체 stack이 아니라 CLI만 설치해야 하면 repository의 `bin/`을 SSoT로 사용합니다.
+전체 stack이 아니라 CLI만 설치해야 하면 repository의 `bin/`에서 설치합니다.
 
 ```bash
 bin/install.sh --force

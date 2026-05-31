@@ -24,7 +24,7 @@ Hermes / Discord
 
 - **Session discovery** — merges OMX lifecycle logs, Codex JSONL sessions, and tmux panes into one bridge session view.
 - **Full output access** — reads the latest assistant/final-answer text instead of only short notification previews.
-- **Command dispatch** — sends follow-up instructions into the visible tmux pane through bridge-owned audit paths.
+- **Command dispatch** — sends follow-up instructions into the visible tmux pane through bridge audit paths.
 - **Helper CLIs** — installs `omx-new`, `omx-send`, and `omx-kill` for Hermes-friendly session lifecycle operations.
 - **Discord delivery** — routes `AskPermission`, `FinalAnswer`, lifecycle, and command events through Hermes webhook or direct Discord fast-path delivery.
 - **Project channel routing** — resolves, creates, and records project-specific Discord channel mappings.
@@ -73,7 +73,7 @@ The bridge is designed for same-host use and binds to `127.0.0.1` by default. It
 
 ## Documentation
 
-README is intentionally only a landing page. The detailed contracts live in the linked documents below.
+For setup, operations, and implementation details, use the guides below.
 
 | Need | Document |
 | --- | --- |
@@ -84,6 +84,6 @@ README is intentionally only a landing page. The detailed contracts live in the 
 | Internal state, delivery ordering, and edge cases | [docs/internals.md](docs/internals.md) |
 | Hermes Gateway webhook and Discord behavior | [docs/hermes-gateway-integration.md](docs/hermes-gateway-integration.md) |
 | Bridge/Hermes-only agent install runbook | [docs/bridge-hermes-only-install.md](docs/bridge-hermes-only-install.md) |
-| Helper CLI contract | [bin/README.md](bin/README.md) |
+| Helper CLI usage | [bin/README.md](bin/README.md) |
 
-The helper lifecycle contract is owned by `bin/` and the install scripts. Avoid copying those details into README; update the owning document or script instead.
+Helper CLI details are documented in `bin/README.md` and the helper scripts themselves.

@@ -83,7 +83,7 @@ The default scope is `--scope user`. The service is installed under `~/.config/s
 
 ## 3. Manual helper CLI install only
 
-If you only need the CLIs, treat the repository `bin/` directory as the SSoT.
+If you only need the CLIs, install them from the repository `bin/` directory.
 
 ```bash
 bin/install.sh --force

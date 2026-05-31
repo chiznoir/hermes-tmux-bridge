@@ -17,8 +17,8 @@ metadata:
 
 # OMX New
 
-This skill owns new session creation. Use `omx-new` to start a new visible OMX/Codex TUI session. This replaces legacy `cwt-new` and does not use clawhip.
-Hermes should use `omx-new` rather than raw `omx --madmax --high`; the helper owns tmux/HUD/session registration defaults.
+Use this skill for new session creation. Use `omx-new` to start a new visible OMX/Codex TUI session. This replaces legacy `cwt-new` and does not use clawhip.
+Hermes should use `omx-new` rather than raw `omx --madmax --high`; the helper applies tmux/HUD/session registration defaults.
 
 ## Boundary
 

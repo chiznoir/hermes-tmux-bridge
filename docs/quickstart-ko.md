@@ -124,13 +124,13 @@ WEBHOOK_PORT=8644
 WEBHOOK_SECRET=<same secret>
 ```
 
-Hermes webhook subscription은 `scripts/install-hermes-stack.sh`가 만드는 `subscription_prompt`를 SSoT로 사용해 설치합니다. 공개 문서에 prompt 전문을 복사하지 않습니다. prompt가 바뀌면 스크립트와 Hermes skill을 갱신한 뒤 아래처럼 재설치합니다.
+Hermes webhook subscription은 `scripts/install-hermes-stack.sh`의 `subscription_prompt`로 설치합니다. prompt가 바뀌면 스크립트와 Hermes skill을 갱신한 뒤 아래처럼 재설치합니다.
 
 ```bash
 scripts/install-hermes-stack.sh --webhook --restart --non-interactive
 ```
 
-수동 `hermes webhook subscribe`가 필요하면 `scripts/install-hermes-stack.sh`의 `subscription_prompt` 내용을 그대로 사용하고, 문서에 오래된 prompt 사본을 새로 만들지 마세요. 현재 subscription은 `hermes-omx-notify,omx-new,omx-send,omx-kill` 네 skill을 함께 로드하며, prompt에는 `CommandSubmitted`/`User Command` 원문 알림, 기본 `direct` FinalAnswer fullText, 선택 `summary`, 긴 `FinalAnswer` 분할 시 첫 조각만 제목을 표시하고 모든 조각 끝에 `(i/N)`을 붙이는 규칙, bridge-owned direct chunk 전송, `원문 그대로` 예외, Discord-originated dispatch의 `omx-send --discord-approval` + Hermes `clarify` 승인 카드 gate, 그리고 생성/전달/종료 intent를 각각 `omx-new`, `omx-send`, `omx-kill`로 넘기는 경계 규칙이 포함됩니다. `--discord-approval`은 bridge pending state만 만들므로 Hermes가 `clarify`/AskUserQuestion을 호출해야 실제 Discord 전송/거절/추가수정 버튼이 보입니다. `omx-send` 전달 프롬프트의 routing metadata/payload instruction 분리와 의미 보존형 실행 지시 정제 규칙은 `skills/omx-send/SKILL.md`가 소유합니다. `/new`/`/resume`은 Hermes/Gateway 라우팅 명령으로 `omx-new`에 매핑하지 않고, 기존 OMX/Codex pane에 보내는 Codex slash command라면 원문 그대로 전달합니다.
+수동 `hermes webhook subscribe`가 필요하면 `scripts/install-hermes-stack.sh`의 현재 `subscription_prompt` 내용을 사용하세요. 현재 subscription은 `hermes-omx-notify,omx-new,omx-send,omx-kill` 네 skill을 함께 로드하며, prompt에는 `CommandSubmitted`/`User Command` 원문 알림, 기본 `direct` FinalAnswer fullText, 선택 `summary`, 긴 `FinalAnswer` 분할 시 첫 조각만 제목을 표시하고 모든 조각 끝에 `(i/N)`을 붙이는 규칙, bridge-managed direct chunk 전송, `원문 그대로` 예외, Discord-originated dispatch의 `omx-send --discord-approval` + Hermes `clarify` 승인 카드 gate, 그리고 생성/전달/종료 intent를 각각 `omx-new`, `omx-send`, `omx-kill`로 넘기는 경계 규칙이 포함됩니다. `--discord-approval`은 bridge pending state만 만들므로 Hermes가 `clarify`/AskUserQuestion을 호출해야 실제 Discord 전송/거절/추가수정 버튼이 보입니다. `omx-send` 전달 프롬프트의 routing metadata/payload instruction 분리와 의미 보존형 실행 지시 정제 규칙은 `skills/omx-send/SKILL.md`에 정리되어 있습니다. `/new`/`/resume`은 Hermes/Gateway 라우팅 명령으로 `omx-new`에 매핑하지 않고, 기존 OMX/Codex pane에 보내는 Codex slash command라면 원문 그대로 전달합니다.
 
 서비스 재시작:
 

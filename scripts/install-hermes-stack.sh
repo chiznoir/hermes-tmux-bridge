@@ -24,7 +24,7 @@ Options:
   --project PROJECT=ID           Add/update a project channel mapping; repeatable
   --project-root PATH            Optional fixed OMX project root to scan
   --repo-root PATH               Bridge repository root (default: parent of scripts/)
-  --state-root PATH              Bridge-owned state/log/cache root
+  --state-root PATH              Bridge state/log/cache root
   --hermes-home PATH             Hermes home (default: $HERMES_HOME or ~/.hermes)
   --cli-dir PATH                 Install helper CLIs here (default: ~/.local/bin)
   --copy-cli                     Copy helper CLIs instead of symlinking them
@@ -397,11 +397,11 @@ OMX/Codex Discord 알림·제어 라우터.
 
 대상/금지: OMX lifecycle만. `channel_mapping_status=session-thread`: `channel_id`/`discord_delivery_target_id`/`chunk_delivery_channel_id`는 이미 Discord thread다. 긴 direct FinalAnswer는 bot token과 thread target이 있으면 브리지가 Discord에 직접 순차 전송한다. Hermes에 chunked payload가 도착한 경우에는 브리지가 1800자 안전 한도로 미리 나눈 각 payload를 순서대로 같은 thread에 보내고 재탐색/fallback 금지. 알림=응답; 확인 금지. `알림 렌더링 완료`/`요약을 보냈고` 금지.
 
-이벤트: standalone `SessionIdle` 골격 알림은 보내지 않고 `FinalAnswer`를 `Session Idle` 제목으로 보낸다. `SessionEnd`: `duration`/`reason`. `CommandSubmitted`는 `User Command`; `payload.message_markdown` 그대로, 요약/재작성 금지; pre-dispatch 미적용. `FinalAnswer`: 제목 `Session Idle`; 브리지가 긴 본문을 1800자 이하 조각으로 미리 나누며 분할 시 모든 조각 끝에 `(i/N)`, 제목/컨텍스트는 첫 조각만, 후속 조각도 같은 `channel_id`/`discord_delivery_target_id`로만 전송. 긴 direct 조각은 bridge-owned Discord 전송이 우선이며 Hermes가 받은 조각만 그대로 처리한다. `payload.message_markdown`은 골격일 수 있어 `핵심 결론`, `원인/수정 내용`, `검증 결과`, `남은 주의/운영 조치`로 재배열. 짧은 원문 8~12줄, 보통 12~20줄, 긴 원문 20~36줄. `text_truncated=true`면 `read_endpoints.idle_latest`; 긴 원문은 판단 근거·수정 포인트를 남긴다. `notification_mode=direct`는 summary를 만들지 않는다; fullText 그대로, `direct_full_text_unavailable=true`면 실패를 명시.
+이벤트: standalone `SessionIdle` 골격 알림은 보내지 않고 `FinalAnswer`를 `Session Idle` 제목으로 보낸다. `SessionEnd`: `duration`/`reason`. `CommandSubmitted`는 `User Command`; `payload.message_markdown` 그대로, 요약/재작성 금지; pre-dispatch 미적용. `FinalAnswer`: 제목 `Session Idle`; 브리지가 긴 본문을 1800자 이하 조각으로 미리 나누며 분할 시 모든 조각 끝에 `(i/N)`, 제목/컨텍스트는 첫 조각만, 후속 조각도 같은 `channel_id`/`discord_delivery_target_id`로만 전송. 긴 direct 조각은 bridge-managed Discord 전송이 우선이며 Hermes가 받은 조각만 그대로 처리한다. `payload.message_markdown`은 골격일 수 있어 `핵심 결론`, `원인/수정 내용`, `검증 결과`, `남은 주의/운영 조치`로 재배열. 짧은 원문 8~12줄, 보통 12~20줄, 긴 원문 20~36줄. `text_truncated=true`면 `read_endpoints.idle_latest`; 긴 원문은 판단 근거·수정 포인트를 남긴다. `notification_mode=direct`는 summary를 만들지 않는다; fullText 그대로, `direct_full_text_unavailable=true`면 실패를 명시.
 
 FinalAnswer 스타일: 설명 문장은 한국어 중심. `Document graph`(문서 그래프), `keyword_fallback`(키워드 fallback 경로)처럼 첫 뜻 병기. 영어 명사구를 한국어 문장 안에 길게 이어 붙이지 않는다. 명령어/경로/env/hash/PID는 backtick. 파일/설정/커밋/테스트는 대표 묶음, 판단에 필요한 식별자 보존.
 
-전용 skill 경계: `hermes-omx-notify`는 bridge read/status/notification rendering만 맡는다. 세션 생성은 `omx-new`, 전달/승인/거절은 `omx-send`, 종료는 `omx-kill` skill을 따른다. `omx-send` prompt refinement SSoT는 `skills/omx-send/SKILL.md`이며, temp file/write_file을 쓰더라도 원문 Discord reply가 아니라 정제된 prompt만 기록해야 한다. Discord-originated Hermes dispatch는 정제된 prompt를 바로 보내지 말고 `omx-send --discord-approval`로 bridge-owned `omx-send-approval` question을 만든 다음 `clarify`/AskUserQuestion으로 실제 Discord 승인 카드를 렌더링해야 한다.
+전용 skill 경계: `hermes-omx-notify`는 bridge read/status/notification rendering만 맡는다. 세션 생성은 `omx-new`, 전달/승인/거절은 `omx-send`, 종료는 `omx-kill` skill을 따른다. `omx-send` prompt refinement 규칙은 `skills/omx-send/SKILL.md`에 있으며, temp file/write_file을 쓰더라도 원문 Discord reply가 아니라 정제된 prompt만 기록해야 한다. Discord-originated Hermes dispatch는 정제된 prompt를 바로 보내지 말고 `omx-send --discord-approval`로 bridge-managed `omx-send-approval` question을 만든 다음 `clarify`/AskUserQuestion으로 실제 Discord 승인 카드를 렌더링해야 한다.
 
 원문 그대로 요청: summary 없이 `fullText` 그대로. `payload.message_markdown`, `payload.text_preview`, 알림 조각/tmux capture로 재구성하지 않는다. 전체 원문을 새 ```markdown 코드블럭으로 감싸지 않고, 브리지가 이미 나눈 조각을 순서대로 보내며 markdown fence 보존, 모든 조각 끝 `(i/N)`, 제목 반복 금지. `fullText` 조회 실패/빈 값은 실패 명시.
 
