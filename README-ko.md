@@ -1,6 +1,6 @@
 # hermes-codex-notify
 
-**Hermes, Codex, tmux 기반 에이전트 세션을 위한 localhost 우선 bridge core.**
+**Hermes, Codex, tmux 기반 에이전트 세션을 위한 localhost 우선 notification bridge.**
 
 [English](README.md)
 
@@ -275,9 +275,10 @@ npm start
 - [Install runbook](INSTALL.md) — 에이전트용 canonical 설치 흐름.
 - [Quick start](docs/quickstart-ko.md) — Hermes Gateway + Discord 빠른 설치 경로.
 - [Install guide](docs/install-ko.md) — 상세 설치와 env 설명.
-- [Operations guide](docs/operations.md) — runtime routing과 troubleshooting 참고.
+- [Operations guide](docs/operations.md) — 짧은 day-2 service/routing/troubleshooting runbook.
+- [Internals and risk notes](docs/internals.md) — delivery ordering, session reconciliation, refactor risk 상세 점검.
 - [Hermes Gateway integration](docs/hermes-gateway-integration.md) — webhook subscription과 Discord delivery 동작.
-- [Bridge + Hermes install](docs/bridge-hermes-only-install-ko.md) — bridge/Hermes/Discord 알림 설치 runbook.
+- [Notify + Hermes install](docs/bridge-hermes-only-install-ko.md) — Hermes/Discord 알림 설치 runbook.
 - [Helper CLI docs](bin/README.md) — `codex-new`/`codex-send`/`codex-kill` 운영 기준.
 
 `codex-new`, `codex-send`, `codex-kill` helper 계약의 SSoT는 `bin/`이고 bridge lifecycle 설치는 `bin/install.sh`, `scripts/install-codex-cli.sh`, 또는 `scripts/install-hermes-stack.sh`가 담당합니다. 스크립트 내용을 문서에 중복 복사하지 않습니다.

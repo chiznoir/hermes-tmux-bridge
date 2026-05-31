@@ -1,6 +1,6 @@
 # hermes-codex-notify
 
-**Localhost-first bridge core for Hermes, Codex, and tmux-backed agent sessions.**
+**Localhost-first notification bridge for Hermes, Codex, and tmux-backed agent sessions.**
 
 [한국어](README-ko.md)
 
@@ -276,9 +276,10 @@ Useful source entry points:
 - [Install runbook](INSTALL.md) — canonical agent-facing install flow.
 - [Quick start](docs/quickstart.md) — fastest Hermes Gateway + Discord setup path.
 - [Install guide](docs/install.md) — detailed install and environment notes.
-- [Operations guide](docs/operations.md) — runtime routing and troubleshooting notes.
+- [Operations guide](docs/operations.md) — short day-2 service, routing, and troubleshooting runbook.
+- [Internals and risk notes](docs/internals.md) — detailed delivery ordering, session reconciliation, and refactor risk checks.
 - [Hermes Gateway integration](docs/hermes-gateway-integration.md) — webhook subscription and Discord delivery behavior.
-- [Bridge + Hermes install](docs/bridge-hermes-only-install.md) — agent runbook for bridge/Hermes/Discord notifications.
+- [Notify + Hermes install](docs/bridge-hermes-only-install.md) — agent runbook for Hermes/Discord notification installs.
 - [Helper CLI docs](bin/README.md) — `codex-new`/`codex-send`/`codex-kill` operating contract.
 
 The `codex-new`, `codex-send`, and `codex-kill` helper contract is owned by `bin/` and installed by `bin/install.sh`, `scripts/install-codex-cli.sh`, or `scripts/install-hermes-stack.sh`; avoid duplicating those scripts in prose.
