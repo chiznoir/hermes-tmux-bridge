@@ -147,6 +147,21 @@ export function sendToTmux(target, text, { submit = true } = {}) {
   return { ok: true };
 }
 
+export function killTmuxSession(target) {
+  if (!target || typeof target !== 'string') {
+    return { ok: false, error: 'missing tmux target' };
+  }
+  const result = spawnSync(process.env.TMUX_BIN || 'tmux', ['kill-session', '-t', target], {
+    encoding: 'utf8',
+    timeout: 3000,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error || result.status !== 0) {
+    return { ok: false, error: result.error?.message || result.stderr || `tmux exited ${result.status}` };
+  }
+  return { ok: true };
+}
+
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }

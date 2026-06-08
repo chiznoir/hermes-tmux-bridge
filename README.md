@@ -25,6 +25,7 @@ Hermes / Discord
 - **Session discovery** — merges OMX lifecycle logs, Codex JSONL sessions, and tmux panes into one bridge session view.
 - **Full output access** — reads the latest assistant/final-answer text instead of only short notification previews.
 - **Command dispatch** — sends follow-up instructions into the visible tmux pane through bridge audit paths.
+- **GJC lifecycle control** — launches `gjc --tmux` / `gjc --tmux --worktree <path>` for a target checkout, then stops only managed GJC tmux sessions after validation.
 - **Helper CLIs** — installs `tmux-new`, `tmux-send`, and `tmux-kill` for Hermes-friendly session lifecycle operations.
 - **Discord delivery** — routes `AskPermission`, `FinalAnswer`, lifecycle, and command events through Hermes webhook or direct Discord fast-path delivery.
 - **Project channel routing** — resolves, creates, and records project-specific Discord channel mappings.
@@ -61,6 +62,25 @@ Expected health response:
 ```json
 { "ok": true }
 ```
+
+## GJC control model
+
+Hermes control of GJC uses the documented external-runner path, not GJC HTTPS bridge session-control endpoints. Start or create a repo/worktree-local GJC tmux runner, send commands through the local tmux dispatch route, and read results from GJC JSONL logs.
+
+```bash
+curl -sS -X POST http://127.0.0.1:3037/gjc/sessions \
+  -H 'content-type: application/json' \
+  -d '{"cwd":"/path/to/repo","worktree":"/path/to/worktree"}'
+
+curl -sS -X POST http://127.0.0.1:3037/sessions/<gjc-session-id>/commands \
+  -H 'content-type: application/json' \
+  -d '{"mode":"tmux","commandText":"/skill:ralplan ..."}'
+
+curl -sS http://127.0.0.1:3037/sessions/<gjc-session-id>/events
+curl -sS -X POST http://127.0.0.1:3037/sessions/<gjc-session-id>/stop
+```
+
+GJC `--mode bridge` remains probe/diagnostic-only for this project until GJC officially enables `/commands`, `/events`, and `/control`. Disabled bridge endpoints must be reported as disabled; they are never silently retried through tmux.
 
 ## Security model
 

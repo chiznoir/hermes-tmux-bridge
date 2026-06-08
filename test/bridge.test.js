@@ -145,6 +145,10 @@ case "$1" in
     printf '%s
 ' "$*" >> "$CALL_LOG"
     ;;
+  kill-session)
+    printf '%s
+' "$*" >> "$CALL_LOG"
+    ;;
   *)
     exit 1
     ;;
@@ -326,6 +330,125 @@ test('POST /sessions/:id/commands dispatches only to managed GJC tmux targets', 
     assert.equal(res.json.delivery.ok, false);
     assert.equal(res.json.delivery.reason, 'unmanaged-gjc-target');
     assert.match(res.json.delivery.error, /managed gjc tmux target required/);
+  });
+});
+
+test('POST /gjc/sessions launches a GJC tmux external-runner and records audit', async () => {
+  const { root } = await gjcFixture();
+  const calls = [];
+  const server = createServer({
+    projectRoot: root,
+    launchGjcSessionFn: (body, options) => {
+      calls.push({ body, projectRoot: options.projectRoot });
+      return {
+        ok: true,
+        backend: 'gjc-tmux',
+        pid: 12345,
+        requestId: body.requestId,
+        cwd: body.cwd,
+        worktree: body.worktree,
+        args: ['--tmux', '--worktree', body.worktree],
+      };
+    },
+  });
+  const res = await request(server, '/gjc/sessions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ requestId: 'launch-1', cwd: root, worktree: join(root, 'worktree-a'), gjcBin: '/tmp/evil-gjc' }),
+  });
+
+  assert.equal(res.status, 202);
+  assert.equal(res.json.launch.ok, true);
+  assert.equal(res.json.launch.backend, 'gjc-tmux');
+  assert.equal(res.json.next.dispatchMode, 'tmux');
+  assert.equal(res.json.next.resultSource, 'gjc-jsonl');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.cwd, root);
+  assert.equal(calls[0].body.gjcBin, 'gjc');
+
+  const audit = await readBridgeAuditLog(root);
+  assert.ok(audit.some((entry) => entry.eventType === 'gjc.session.launch.accepted' && entry.requestId === 'launch-1'));
+  assert.ok(audit.some((entry) => entry.eventType === 'gjc.session.launch.started' && entry.launch?.pid === 12345));
+});
+
+test('POST /gjc/sessions reuses an existing managed GJC runner for the same cwd', async () => {
+  const { root } = await gjcFixture();
+  const server = createServer({
+    projectRoot: root,
+    listTmuxPanesFn: () => [{
+      managed: true,
+      paneDead: false,
+      tmuxId: 'gjc-managed',
+      tmuxPaneId: '%88',
+      paneCurrentPath: root,
+      gjcBranch: 'gjc',
+      gjcProject: root.split('/').pop().replace(/[^a-z0-9]+/gi, '-').toLowerCase(),
+      gjcSessionId: 'existing-gjc-session',
+    }],
+  });
+  const res = await request(server, '/gjc/sessions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ requestId: 'launch-reuse', cwd: root }),
+  });
+
+  assert.equal(res.status, 202);
+  assert.equal(res.json.launch.ok, true);
+  assert.equal(res.json.launch.reused, true);
+  assert.equal(res.json.launch.tmuxPaneId, '%88');
+
+  const audit = await readBridgeAuditLog(root);
+  assert.ok(audit.some((entry) => entry.eventType === 'gjc.session.launch.reused' && entry.launch?.gjcSessionId === 'existing-gjc-session'));
+});
+
+test('POST /gjc/sessions rejects invalid worktree before spawning GJC', async () => {
+  const { root } = await gjcFixture();
+  const missingWorktree = join(root, 'missing-worktree');
+  const res = await request(createServer({ projectRoot: root }), '/gjc/sessions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ requestId: 'launch-invalid-worktree', cwd: root, worktree: missingWorktree }),
+  });
+
+  assert.equal(res.status, 502);
+  assert.equal(res.json.launch.ok, false);
+  assert.equal(res.json.launch.reason, 'invalid-worktree');
+
+  const audit = await readBridgeAuditLog(root);
+  assert.ok(audit.some((entry) => entry.eventType === 'gjc.session.launch.failed' && entry.launch?.reason === 'invalid-worktree'));
+});
+
+test('POST /sessions/:id/stop kills only managed GJC tmux sessions and records audit', async () => {
+  const { root, homeRoot, xdgRoot, sessionId } = await gjcFixture();
+  const managed = await writeManagedGjcTmuxBin(root, { managed: true, displayManaged: true });
+  const unmanaged = await writeManagedGjcTmuxBin(root, { managed: true, displayManaged: false });
+
+  await withEnv({ HOME: homeRoot, XDG_DATA_HOME: xdgRoot, GJC_SESSIONS_ROOT: undefined, TMUX_BIN: managed.fakeTmuxBin }, async () => {
+    const res = await request(createServer({ projectRoot: root }), `/sessions/${sessionId}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 202);
+    assert.equal(res.json.stop.ok, true);
+    assert.equal(res.json.stop.target, 'gjc-managed');
+    const calls = await readFile(managed.fakeTmuxCallsPath, 'utf8');
+    assert.match(calls, /kill-session -t gjc-managed/);
+
+    const audit = await readBridgeAuditLog(root);
+    assert.ok(audit.some((entry) => entry.eventType === 'gjc.session.stop.accepted' && entry.gjcSessionId === sessionId));
+    assert.ok(audit.some((entry) => entry.eventType === 'gjc.session.stop.completed' && entry.stop?.ok === true));
+  });
+
+  await withEnv({ HOME: homeRoot, XDG_DATA_HOME: xdgRoot, GJC_SESSIONS_ROOT: undefined, TMUX_BIN: unmanaged.fakeTmuxBin }, async () => {
+    const res = await request(createServer({ projectRoot: root }), `/sessions/${sessionId}/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.equal(res.status, 409);
+    assert.equal(res.json.stop.ok, false);
+    assert.equal(res.json.stop.reason, 'unmanaged-gjc-target');
   });
 });
 

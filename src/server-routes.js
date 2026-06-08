@@ -1,8 +1,9 @@
 import { latestAssistantMessage, readCodexLog } from './codex-log.js';
+import { launchGjcTmuxSession, buildGjcLaunchRequest } from './gjc-lifecycle.js';
 import { latestGjcAssistantMessage, readGjcLog } from './gjc-log.js';
 import { buildInteractions, recordCommand } from './interactions.js';
 import { latestQuestionRequest, recordQuestionAnswer, recordQuestionRequest } from './question-answers.js';
-import { isManagedTmuxTarget, sendToTmux, targetForSession } from './tmux.js';
+import { isManagedTmuxTarget, killTmuxSession, sendToTmux, targetForSession } from './tmux.js';
 import { getSessionById, listSessions } from './control-plane/registry.js';
 import { appendAudit, readAuditLog } from './control-plane/audit-log.js';
 import { decideBackend, normalizeCommandMode } from './control-plane/policy.js';
@@ -680,6 +681,60 @@ async function sendSessionsRoute({ req, res, url, indexOptions, json }) {
   return true;
 }
 
+async function sendGjcSessionsRoute({ req, res, parts, projectRoot, options, lockManager, json }) {
+  if (!(req.method === 'POST' && parts[0] === 'gjc' && parts[1] === 'sessions' && parts.length === 2)) return false;
+  const body = await readJsonBody(req);
+  const launchRequest = typeof options.buildGjcLaunchRequestFn === 'function'
+    ? options.buildGjcLaunchRequestFn(body, { ...options, projectRoot })
+    : buildGjcLaunchRequest(body, { ...options, projectRoot });
+  const lockKey = `gjc-launch:${launchRequest.worktree || launchRequest.cwd}`;
+  const lock = lockManager.acquire(lockKey, { operation: 'gjc-session-launch', requestId: launchRequest.requestId });
+  if (!lock.ok) {
+    await appendAudit('gjc.session.launch.lock_conflict', { lockKey, requestId: launchRequest.requestId, error: 'gjc session launch already in progress' }, { projectRoot });
+    json(res, 409, { error: 'gjc session launch already in progress' });
+    return true;
+  }
+
+  try {
+    await appendAudit('gjc.session.launch.accepted', {
+      lockKey,
+      requestId: launchRequest.requestId,
+      cwd: launchRequest.cwd,
+      worktree: launchRequest.worktree || null,
+      backend: 'gjc-tmux',
+    }, { projectRoot });
+    const launchBody = {
+      ...body,
+      requestId: launchRequest.requestId,
+      cwd: launchRequest.cwd,
+      worktree: launchRequest.worktree,
+      gjcBin: launchRequest.bin,
+    };
+    const launch = await launchGjcTmuxSession(launchBody, { ...options, projectRoot });
+    const launchEvent = launch.ok
+      ? (launch.reused ? 'gjc.session.launch.reused' : 'gjc.session.launch.started')
+      : 'gjc.session.launch.failed';
+    await appendAudit(launchEvent, {
+      lockKey,
+      requestId: launchRequest.requestId,
+      backend: 'gjc-tmux',
+      launch,
+      error: launch.error || null,
+    }, { projectRoot });
+    json(res, launch.ok ? 202 : 502, {
+      launch,
+      next: {
+        sessionsEndpoint: '/sessions',
+        dispatchMode: 'tmux',
+        resultSource: 'gjc-jsonl',
+      },
+    });
+    return true;
+  } finally {
+    lock.release?.();
+  }
+}
+
 async function sendProjectChannelRoute({ req, res, parts, projectRoot, json }) {
   if (!(parts[0] === 'projects' && parts[1] && parts[2] === 'channel' && parts.length === 3)) return false;
   const project = parts[1];
@@ -771,6 +826,70 @@ async function sendCommandRoute({ req, res, session, options, projectRoot, lockM
   });
 }
 
+async function stopGjcSessionRoute({ req, res, session, options, projectRoot, lockManager, json }) {
+  const body = await readJsonBody(req);
+  if (!(session.backend === 'gjc' || session.gjcSessionId)) {
+    return json(res, 409, { error: 'session is not a gjc session' });
+  }
+  const target = session.tmuxId || targetForSession(session);
+  const managedTarget = validateManagedGjcTarget(session, target);
+  if (!managedTarget.ok) {
+    await appendAudit('gjc.session.stop.failed', {
+      sessionId: session.bridgeSessionId,
+      bridgeSessionId: session.bridgeSessionId,
+      gjcSessionId: session.gjcSessionId,
+      target,
+      backend: 'tmux',
+      error: managedTarget.error,
+      stop: { ok: false, backend: 'tmux', reason: managedTarget.reason, error: managedTarget.error, target },
+    }, { projectRoot });
+    return json(res, 409, {
+      stop: { ok: false, backend: 'tmux', reason: managedTarget.reason, error: managedTarget.error, target },
+    });
+  }
+
+  const lockKey = lockKeyForSession(session);
+  const lock = lockManager.acquire(lockKey, { operation: 'gjc-session-stop', gjcSessionId: session.gjcSessionId });
+  if (!lock.ok) {
+    await appendAudit('gjc.session.stop.lock_conflict', {
+      sessionId: session.bridgeSessionId,
+      bridgeSessionId: session.bridgeSessionId,
+      gjcSessionId: session.gjcSessionId,
+      lockKey,
+      error: 'command already in progress for session',
+    }, { projectRoot });
+    return json(res, 409, { stop: { ok: false, reason: 'lock-conflict', error: 'command already in progress for session' } });
+  }
+
+  try {
+    const auditBase = {
+      sessionId: session.bridgeSessionId,
+      bridgeSessionId: session.bridgeSessionId,
+      gjcSessionId: session.gjcSessionId,
+      target,
+      backend: 'tmux',
+    };
+    await appendAudit('gjc.session.stop.accepted', auditBase, { projectRoot });
+    const stop = isTruthyBodyValue(body.dryRun)
+      ? { ok: true, dryRun: true, backend: 'tmux', target }
+      : {
+        ...(typeof options.stopGjcSessionFn === 'function'
+          ? await options.stopGjcSessionFn(session, { target, projectRoot })
+          : killTmuxSession(target)),
+        backend: 'tmux',
+        target,
+      };
+    await appendAudit(stop.ok ? 'gjc.session.stop.completed' : 'gjc.session.stop.failed', {
+      ...auditBase,
+      stop,
+      error: stop.error || null,
+    }, { projectRoot });
+    return json(res, stop.ok ? 202 : 502, { stop });
+  } finally {
+    lock.release?.();
+  }
+}
+
 async function sendQuestionAnswerRoute({ req, res, session, projectRoot, lockManager, options, json }) {
   const body = await readJsonBody(req);
   const result = await dispatchQuestionAnswer({ session, body, projectRoot, lockManager, options });
@@ -837,6 +956,11 @@ async function sendSessionRoute({ req, res, parts, indexOptions, projectRoot, op
     return true;
   }
 
+  if (req.method === 'POST' && parts[2] === 'stop' && parts.length === 3) {
+    await stopGjcSessionRoute({ req, res, session, options, projectRoot, lockManager, json });
+    return true;
+  }
+
   if (req.method === 'POST' && parts[2] === 'question-answers' && parts.length === 3) {
     await sendQuestionAnswerRoute({ req, res, session, projectRoot, lockManager, options, json });
     return true;
@@ -848,6 +972,7 @@ async function sendSessionRoute({ req, res, parts, indexOptions, projectRoot, op
 export async function dispatchBridgeRoute(context) {
   return await sendAuditRoute(context)
     || await sendSessionsRoute(context)
+    || await sendGjcSessionsRoute(context)
     || await sendProjectChannelRoute(context)
     || await sendSessionRoute(context);
 }

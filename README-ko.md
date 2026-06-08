@@ -25,6 +25,7 @@ Hermes / Discord
 - **세션 발견** — OMX lifecycle log, Codex JSONL session, tmux pane을 하나의 bridge session view로 병합합니다.
 - **전체 출력 조회** — 짧은 notification preview가 아니라 최신 assistant/final-answer 원문을 읽습니다.
 - **명령 전달** — bridge audit path를 통해 visible tmux pane에 후속 지시를 전달합니다.
+- **GJC lifecycle 제어** — target checkout에서 `gjc --tmux` / `gjc --tmux --worktree <path>`를 실행하고, 검증된 managed GJC tmux session만 종료합니다.
 - **Helper CLI** — Hermes가 쓰기 쉬운 `omx-new`, `omx-send`, `omx-kill` lifecycle 도구를 설치합니다.
 - **Discord delivery** — `AskPermission`, `FinalAnswer`, lifecycle, command event를 Hermes webhook 또는 direct Discord fast path로 전달합니다.
 - **프로젝트 채널 라우팅** — 프로젝트별 Discord channel mapping을 찾거나 만들고 기록합니다.
@@ -61,6 +62,25 @@ command -v omx-new omx-send omx-kill
 ```json
 { "ok": true }
 ```
+
+## GJC 제어 모델
+
+Hermes의 GJC 제어는 GJC HTTPS bridge session-control endpoint가 아니라, 공식 문서의 external-runner 경로를 사용합니다. repo/worktree별 GJC tmux runner를 만들거나 붙고, 로컬 tmux dispatch route로 명령을 보내고, 결과는 GJC JSONL log에서 읽습니다.
+
+```bash
+curl -sS -X POST http://127.0.0.1:3037/gjc/sessions \
+  -H 'content-type: application/json' \
+  -d '{"cwd":"/path/to/repo","worktree":"/path/to/worktree"}'
+
+curl -sS -X POST http://127.0.0.1:3037/sessions/<gjc-session-id>/commands \
+  -H 'content-type: application/json' \
+  -d '{"mode":"tmux","commandText":"/skill:ralplan ..."}'
+
+curl -sS http://127.0.0.1:3037/sessions/<gjc-session-id>/events
+curl -sS -X POST http://127.0.0.1:3037/sessions/<gjc-session-id>/stop
+```
+
+GJC `--mode bridge`는 GJC가 `/commands`, `/events`, `/control`을 공식 enable하기 전까지 이 프로젝트에서 probe/diagnostic 전용입니다. disabled bridge endpoint는 disabled로 보고하며, tmux로 조용히 재시도하지 않습니다.
 
 ## 보안 모델
 
