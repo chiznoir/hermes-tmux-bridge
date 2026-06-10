@@ -169,6 +169,8 @@ POST /sessions/:id/question-answers
 
 `single-answerable`은 버튼/String Select, `multi-answerable`은 multi-select, `allow_other: true`는 Discord modal/text input으로 렌더링합니다. 직접 입력값은 `other_text`로 별도 보존해야 하며 predefined option value로 덮어쓰면 안 됩니다. answer 제출은 renderer/consumer 처리 전까지 `queued` 상태이며, Hermes는 이를 “완료”가 아니라 “bridge queue에 접수됨”으로 표시해야 합니다.
 
+GJC workflow가 deep-interview 중 `GJC_CLARIFY_REQUEST`를 출력하면 Hermes는 `POST /gjc/workflows/:id/clarify`를 호출합니다. Bridge는 linked GJC JSONL에서 관측한 marker만 파싱하고, `classificationHint: "fact"`와 whitelist fact가 모두 canonical workflow/session state에서 확인될 때만 자동 답변합니다. 범위/선호/승인/결정 질문은 `kind: "gjc-clarify"` structured question으로 등록하고 `render: "hermes-clarify-required"`를 반환하므로 Gateway가 Discord clarify UI를 띄워야 합니다. 답변은 `/sessions/:id/question-answers`로 제출되며 bridge가 managed GJC tmux session에 `GJC_CLARIFY_ANSWER`를 exact-once로 전달합니다.
+
 ## clawhip 의존성
 
 브리지는 `clawhip`을 필수 의존성으로 사용하지 않습니다.

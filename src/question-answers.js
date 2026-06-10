@@ -1,4 +1,4 @@
-import { appendFile } from 'node:fs/promises';
+import { appendFile, mkdir, rmdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { bridgeStatePath } from './bridge-paths.js';
@@ -7,6 +7,7 @@ import { ensureDirFor, readJsonl } from './jsonl.js';
 const VALID_ANSWER_KINDS = new Set(['option', 'multi', 'text', 'other']);
 const VALID_QUESTION_TYPES = new Set(['single-answerable', 'multi-answerable', 'free-text']);
 const answerLocks = new Map();
+const questionLocks = new Map();
 
 export function questionAnswersLogPath(projectRoot = process.cwd(), options = {}) {
   return process.env.BRIDGE_QUESTION_ANSWERS_PATH
@@ -48,6 +49,95 @@ function normalizeOptions(options) {
       ...(cleanString(option.description) ? { description: cleanString(option.description) } : {}),
     };
   }).filter(Boolean);
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return value.map(stableJson);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableJson(value[key])]));
+}
+
+function comparableMetadata(metadata = {}) {
+  const next = stableJson(metadata || {});
+  const clarify = next?.gjcClarify;
+  if (clarify && typeof clarify === 'object' && !Array.isArray(clarify)) {
+    delete clarify.latestEventId;
+    delete clarify.sourceLogPath;
+    delete clarify.answerSource;
+    delete clarify.evidence;
+  }
+  return next;
+}
+
+function compatibleQuestion(existing = {}, next = {}) {
+  const comparable = (question = {}) => stableJson({
+    questionId: question.questionId,
+    kind: question.kind || null,
+    question: question.question || '',
+    type: question.type || 'free-text',
+    options: normalizeOptions(question.options),
+    allow_other: question.allow_other === true || question.allowOther === true,
+    other_label: question.other_label || question.otherLabel || 'Other',
+    source: question.source || 'bridge-question-request',
+    expiresAt: question.expiresAt || null,
+    metadata: comparableMetadata(question.metadata),
+  });
+  return JSON.stringify(comparable(existing)) === JSON.stringify(comparable(next));
+}
+
+async function withQuestionLock(key, fn) {
+  const previous = questionLocks.get(key) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => { release = resolve; });
+  const ticket = previous.then(() => current, () => current);
+  questionLocks.set(key, ticket);
+  try {
+    await previous;
+    return await fn();
+  } finally {
+    release();
+    if (questionLocks.get(key) === ticket) questionLocks.delete(key);
+  }
+}
+
+function questionRequestLockRoot(projectRoot = process.cwd(), options = {}) {
+  return `${questionRequestsLogPath(projectRoot, options)}.locks`;
+}
+
+export function questionRequestLockPath(key, projectRoot = process.cwd(), options = {}) {
+  return join(questionRequestLockRoot(projectRoot, options), Buffer.from(String(key)).toString('base64url'));
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withQuestionFileLock(key, options, fn) {
+  const path = questionRequestLockPath(key, options.projectRoot, options);
+  const timeoutMs = Number.isFinite(options.questionRequestLockTimeoutMs)
+    ? options.questionRequestLockTimeoutMs
+    : 5000;
+  const deadline = Date.now() + timeoutMs;
+  await mkdir(questionRequestLockRoot(options.projectRoot, options), { recursive: true });
+
+  for (;;) {
+    try {
+      await mkdir(path);
+      break;
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      if (Date.now() >= deadline) {
+        return { ok: false, status: 423, error: 'question request lock is already held' };
+      }
+      await wait(20);
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    await rmdir(path).catch(() => {});
+  }
 }
 
 export function normalizeQuestionRequest(body = {}) {
@@ -181,10 +271,26 @@ export async function recordQuestionRequest(session, body = {}, options = {}) {
     answerEndpoint: session.bridgeSessionId ? `/sessions/${encodeURIComponent(session.bridgeSessionId)}/question-answers` : null,
     createdAt: now,
   }, session);
-  const path = questionRequestsLogPath(options.projectRoot, options);
-  await ensureDirFor(path);
-  await appendFile(path, `${JSON.stringify(record)}\n`, 'utf8');
-  return { ok: true, status: 202, record };
+  const lockKey = [
+    session.bridgeSessionId || session.codexSessionId || session.omxSessionId || session.tmuxPaneId || 'unknown-session',
+    record.questionId,
+  ].join(':');
+  return withQuestionLock(lockKey, async () => (
+    withQuestionFileLock(lockKey, options, async () => {
+      const existing = await latestQuestionRequest(session, record.questionId, options);
+      if (existing) {
+        if (compatibleQuestion(existing, record)) {
+          return { ok: true, status: 200, duplicate: true, record: existing };
+        }
+        return { ok: false, status: 409, error: 'questionId already exists with incompatible content' };
+      }
+      const path = questionRequestsLogPath(options.projectRoot, options);
+      await ensureDirFor(path);
+      await appendFile(path, `${JSON.stringify(record)}
+`, 'utf8');
+      return { ok: true, status: 202, record };
+    })
+  ));
 }
 
 export async function readQuestionRequests(session = {}, options = {}) {
@@ -265,6 +371,7 @@ export async function recordQuestionAnswer(session, body = {}, options = {}) {
 
   const discordInteractionId = cleanString(body.discordInteractionId || body.discord_interaction_id);
   const componentCustomId = cleanString(body.componentCustomId || body.component_custom_id);
+  const idempotencyKey = cleanString(body.idempotencyKey || body.idempotency_key || body.gjcClarifyAnswerKey || body.gjc_clarify_answer_key);
   const question = options.questionRequest || await latestQuestionRequest(session, normalized.questionId, options);
   const validation = validateAnswerAgainstQuestion(normalized.answer, question);
   if (!validation.ok) return validation;
@@ -272,13 +379,15 @@ export async function recordQuestionAnswer(session, body = {}, options = {}) {
   const lockKey = [
     session.bridgeSessionId || session.codexSessionId || session.omxSessionId || session.tmuxPaneId || 'unknown-session',
     normalized.questionId,
-    discordInteractionId || componentCustomId || 'no-interaction-id',
+    discordInteractionId || componentCustomId || idempotencyKey || 'no-interaction-id',
   ].join(':');
 
   return withAnswerLock(lockKey, async () => {
-    if (discordInteractionId) {
+    const answerDedupeKey = discordInteractionId || componentCustomId || idempotencyKey;
+    if (answerDedupeKey) {
       const existing = (await readQuestionAnswers(session, options)).find((record) => {
-        return record.discordInteractionId === discordInteractionId
+        const recordKey = record.discordInteractionId || record.componentCustomId || record.idempotencyKey;
+        return recordKey === answerDedupeKey
           && record.questionId === normalized.questionId;
       });
       if (existing) return { ok: true, status: 200, duplicate: true, record: existing };
@@ -294,6 +403,7 @@ export async function recordQuestionAnswer(session, body = {}, options = {}) {
       source: cleanString(body.source) || 'bridge-question-answer',
       discordInteractionId,
       componentCustomId,
+      idempotencyKey,
       expiresAt: question.expiresAt || null,
       submittedAt: now,
     }, session);

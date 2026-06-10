@@ -12,6 +12,18 @@ import { routeSessionEvents } from './control-plane/event-router.js';
 import { readProjectChannelMap, resolveProjectChannel, updateProjectChannel } from './project-channels.js';
 import { normalizeCommandTextForDispatch } from './command-normalizer.js';
 import {
+  GJC_CLARIFY_BACKEND,
+  GJC_CLARIFY_KIND,
+  appendGjcClarifyDecision,
+  answerBodyForGjcClarify,
+  gjcClarifyAnswerCommand,
+  gjcClarifyQuestionId,
+  latestGjcClarifyDecision,
+  parseGjcClarifyRequest,
+  readGjcClarifyDecisions,
+  resolveGjcClarifyAutoAnswer,
+} from './gjc-clarify.js';
+import {
   TMUX_SEND_APPROVAL_KIND,
   appendApprovalDecision,
   approvalGateFromBody,
@@ -592,6 +604,174 @@ async function resolveTmuxSendApprovalAnswer({ session, body, question, result, 
   }
 }
 
+function gjcClarifyAnswerText(answer = {}) {
+  if (answer.kind === 'multi') return JSON.stringify(answer.value || answer.selected_values || []);
+  if (answer.kind === 'other') return answer.other_text || answer.value || '';
+  return Array.isArray(answer.value) ? JSON.stringify(answer.value) : String(answer.value || '');
+}
+
+async function reconcileGjcClarifyDispatch({ session, question, existing, projectRoot }) {
+  if (existing?.state !== 'dispatch_started' || !existing.interactionId) return null;
+  const records = await readAuditLog({ sessionId: session.bridgeSessionId, limit: 500 }, { projectRoot });
+  const terminal = [...records].reverse().find((record) => {
+    return record.interactionId === existing.interactionId
+      && (record.eventType === 'command.completed' || record.eventType === 'command.failed');
+  });
+  if (!terminal) return null;
+
+  const ok = terminal.eventType === 'command.completed' && terminal.delivery?.ok === true;
+  return appendGjcClarifyDecision({
+    sessionId: existing.sessionId || session.bridgeSessionId,
+    bridgeSessionId: existing.bridgeSessionId || session.bridgeSessionId,
+    gjcSessionId: existing.gjcSessionId || session.gjcSessionId || null,
+    questionId: existing.questionId || question.questionId,
+    questionAnswerId: existing.questionAnswerId || null,
+    clarifyId: existing.clarifyId,
+    answerSource: existing.answerSource || null,
+    state: ok ? 'dispatch_completed' : 'dispatch_failed',
+    claimedMarkerId: existing.claimedMarkerId || null,
+    dispatchStartedMarkerId: existing.markerId,
+    interactionId: existing.interactionId,
+    delivery: {
+      ok,
+      status: ok ? 'dispatch-completed' : 'dispatch-failed',
+      backend: GJC_CLARIFY_BACKEND,
+      recoveredFromAudit: true,
+      auditId: terminal.auditId,
+      dispatchDelivery: terminal.delivery,
+    },
+    dispatchDelivery: terminal.delivery,
+  }, { projectRoot });
+}
+
+async function resolveGjcClarifyAnswer({ session, body, question, result, projectRoot, lockManager, options }) {
+  if (question?.kind !== GJC_CLARIFY_KIND || !result.ok) return null;
+  const metadata = question.metadata?.gjcClarify && typeof question.metadata.gjcClarify === 'object'
+    ? question.metadata.gjcClarify
+    : {};
+  const clarifyId = metadata.clarifyId;
+  if (!clarifyId) {
+    return {
+      status: 400,
+      delivery: { ok: false, status: 'invalid-clarify-question', backend: GJC_CLARIFY_BACKEND, error: 'gjc clarify metadata is missing' },
+      gjcClarify: null,
+      error: 'gjc clarify metadata is missing',
+    };
+  }
+
+  const lockKey = `gjc-clarify:${session.bridgeSessionId || session.gjcSessionId || session.codexThreadId || 'unknown'}:${question.questionId}`;
+  const lock = lockManager.acquire(lockKey, {
+    questionId: question.questionId,
+    questionAnswerId: result.record.questionAnswerId,
+  });
+  if (!lock.ok) {
+    return {
+      status: 409,
+      delivery: { ok: false, status: 'lock-conflict', backend: GJC_CLARIFY_BACKEND, error: 'gjc clarify answer already in progress' },
+      gjcClarify: null,
+    };
+  }
+
+  try {
+    const existing = latestGjcClarifyDecision(await readGjcClarifyDecisions(session, question.questionId, { projectRoot }));
+    if (existing) {
+      const reconciled = await reconcileGjcClarifyDispatch({ session, question, existing, projectRoot });
+      if (reconciled) {
+        return {
+          status: reconciled.state === 'dispatch_completed' ? 200 : 502,
+          delivery: reconciled.delivery,
+          gjcClarify: reconciled,
+        };
+      }
+      const completed = existing.state === 'dispatch_completed';
+      return {
+        status: completed ? 200 : 202,
+        delivery: {
+          ok: completed,
+          status: completed ? 'already-finalized' : 'dispatch-status-unknown',
+          backend: GJC_CLARIFY_BACKEND,
+          state: existing.state,
+          interactionId: existing.interactionId || null,
+          error: completed ? undefined : 'gjc clarify dispatch started but no terminal marker was recorded; manual reconciliation required',
+        },
+        gjcClarify: existing,
+      };
+    }
+
+    const answerSource = options.gjcClarifyAutoAnswer === true && metadata.answerSource === 'auto-fact' ? 'auto-fact' : 'user';
+    const answerText = gjcClarifyAnswerText(result.record.answer);
+    const base = {
+      sessionId: session.bridgeSessionId,
+      bridgeSessionId: session.bridgeSessionId,
+      gjcSessionId: session.gjcSessionId || null,
+      questionId: question.questionId,
+      questionAnswerId: result.record.questionAnswerId,
+      clarifyId,
+      answerSource,
+    };
+    const claimed = await appendGjcClarifyDecision({
+      ...base,
+      state: answerSource === 'auto-fact' ? 'auto_answer_claimed' : 'user_answer_claimed',
+    }, { projectRoot });
+
+    const commandText = gjcClarifyAnswerCommand({ clarifyId, answer: answerText, source: answerSource });
+    const commandMetadata = {
+      gjcClarify: compactObject({
+        kind: GJC_CLARIFY_KIND,
+        questionId: question.questionId,
+        questionAnswerId: result.record.questionAnswerId,
+        clarifyId,
+        answerSource,
+      }),
+    };
+    const interaction = await recordCommand(session, commandText, {
+      projectRoot,
+      dryRun: false,
+      metadata: commandMetadata,
+    });
+    triggerCommandSubmittedNotifications(options, interaction);
+    const dispatchStarted = await appendGjcClarifyDecision({
+      ...base,
+      state: 'dispatch_started',
+      claimedMarkerId: claimed.markerId,
+      interactionId: interaction.interactionId,
+      delivery: { ok: false, status: 'dispatch-started', backend: GJC_CLARIFY_BACKEND },
+    }, { projectRoot });
+    const dispatched = await dispatchCommand({
+      session,
+      body: { mode: 'tmux', submit: true, dryRun: false },
+      commandText,
+      interaction,
+      projectRoot,
+      lockManager,
+      commandMetadata,
+    });
+    const delivery = {
+      ok: dispatched.delivery?.ok === true,
+      status: dispatched.delivery?.ok ? 'dispatch-completed' : 'dispatch-failed',
+      backend: GJC_CLARIFY_BACKEND,
+      dispatchDelivery: dispatched.delivery,
+    };
+    const marker = await appendGjcClarifyDecision({
+      ...base,
+      state: dispatched.delivery?.ok ? 'dispatch_completed' : 'dispatch_failed',
+      claimedMarkerId: claimed.markerId,
+      dispatchStartedMarkerId: dispatchStarted.markerId,
+      interactionId: interaction.interactionId,
+      delivery,
+      dispatchDelivery: dispatched.delivery,
+    }, { projectRoot });
+    return {
+      status: dispatched.status,
+      delivery: marker.delivery,
+      gjcClarify: marker,
+      interaction,
+    };
+  } finally {
+    lock.release?.();
+  }
+}
+
 async function dispatchQuestionAnswer({ session, body, projectRoot, lockManager, options }) {
   const auditBase = {
     sessionId: session.bridgeSessionId,
@@ -611,6 +791,27 @@ async function dispatchQuestionAnswer({ session, body, projectRoot, lockManager,
   }
   if (result.duplicate) {
     await appendAudit('question_answer.duplicate', { ...auditBase, questionAnswerId: result.record.questionAnswerId }, { projectRoot });
+    if (question?.kind === GJC_CLARIFY_KIND) {
+      const gjcClarify = await resolveGjcClarifyAnswer({ session, body, question, result, projectRoot, lockManager, options });
+      if (gjcClarify?.error) {
+        await appendAudit('question_answer.failed', { ...auditBase, questionAnswerId: result.record.questionAnswerId, error: gjcClarify.error }, { projectRoot });
+      } else if (gjcClarify) {
+        await appendAudit('question_answer.resolved', {
+          ...auditBase,
+          questionAnswerId: result.record.questionAnswerId,
+          duplicate: true,
+          gjcClarify: gjcClarify.gjcClarify,
+          delivery: gjcClarify.delivery,
+        }, { projectRoot });
+        return {
+          status: gjcClarify.status,
+          result,
+          delivery: gjcClarify.delivery,
+          gjcClarify: gjcClarify.gjcClarify,
+          interaction: gjcClarify.interaction,
+        };
+      }
+    }
     return {
       status: result.status || 200,
       result,
@@ -633,6 +834,26 @@ async function dispatchQuestionAnswer({ session, body, projectRoot, lockManager,
       }, { projectRoot });
     }
     return { status: approval.status, result, delivery: approval.delivery, approval: approval.approval, interaction: approval.interaction };
+  }
+  const gjcClarify = await resolveGjcClarifyAnswer({ session, body, question, result, projectRoot, lockManager, options });
+  if (gjcClarify) {
+    if (gjcClarify.error) {
+      await appendAudit('question_answer.failed', { ...auditBase, questionAnswerId: result.record.questionAnswerId, error: gjcClarify.error }, { projectRoot });
+    } else {
+      await appendAudit('question_answer.resolved', {
+        ...auditBase,
+        questionAnswerId: result.record.questionAnswerId,
+        gjcClarify: gjcClarify.gjcClarify,
+        delivery: gjcClarify.delivery,
+      }, { projectRoot });
+    }
+    return {
+      status: gjcClarify.status,
+      result,
+      delivery: gjcClarify.delivery,
+      gjcClarify: gjcClarify.gjcClarify,
+      interaction: gjcClarify.interaction,
+    };
   }
   await appendAudit('question_answer.queued', {
     ...auditBase,
@@ -664,6 +885,157 @@ async function dispatchQuestionRequest({ session, body, projectRoot }) {
     allowOther: result.record.allow_other,
   }, { projectRoot });
   return { status: result.status || 202, result };
+}
+
+async function workflowGjcSession(workflow = {}, indexOptions = {}) {
+  const ids = [
+    workflow.linkedBridgeSessionId,
+    workflow.linkedGjcSessionId,
+    workflow.launch?.gjcSessionId,
+    workflow.launch?.bridgeSessionId,
+  ].filter(Boolean);
+  for (const id of ids) {
+    const session = await getSessionById(id, indexOptions);
+    if (session) return session;
+  }
+
+  const expectedPaths = new Set([
+    workflow.launch?.worktree,
+    workflow.launch?.cwd,
+    workflow.worktreePath,
+    workflow.targetRepoPath,
+  ].filter(Boolean).map((value) => String(value)));
+  const expectedTmux = new Set([
+    workflow.launch?.tmuxId,
+    workflow.launch?.tmuxPaneId,
+  ].filter(Boolean).map((value) => String(value)));
+  if (expectedPaths.size === 0 && expectedTmux.size === 0) return null;
+
+  const sessions = (await listSessions(indexOptions)).filter((candidate) => candidate.backend === 'gjc');
+  const tmuxMatches = sessions.filter((candidate) => {
+    return [candidate.tmuxId, candidate.tmuxPaneId]
+      .filter(Boolean)
+      .some((value) => expectedTmux.has(String(value)));
+  });
+  const pathMatches = sessions.filter((candidate) => {
+    return [candidate.cwd, candidate.paneCurrentPath]
+      .filter(Boolean)
+      .some((value) => expectedPaths.has(String(value)));
+  });
+  if (tmuxMatches.length > 1 || pathMatches.length > 1) return null;
+  if (tmuxMatches.length === 1 && pathMatches.length === 1) {
+    return tmuxMatches[0].bridgeSessionId === pathMatches[0].bridgeSessionId ? tmuxMatches[0] : null;
+  }
+  if (tmuxMatches.length === 1) return tmuxMatches[0];
+  if (pathMatches.length === 1) return pathMatches[0];
+  return null;
+}
+
+function observedClarifyMetadata({ workflow, session, message }) {
+  return {
+    workflowId: workflow.workflowId,
+    latestEventId: message?.id || null,
+    sourceLogPath: session?.sessionLogPath || null,
+  };
+}
+
+function clarifyResponse(status, question = null, extra = {}) {
+  return {
+    clarify: {
+      status,
+      ...(question ? {
+        question,
+        answer_endpoint: question.answerEndpoint,
+      } : {}),
+      ...extra,
+    },
+  };
+}
+
+async function handleGjcWorkflowClarify({ workflow, session, projectRoot, lockManager, options }) {
+  if (!session) {
+    return { status: 409, body: clarifyResponse('blocked', null, { reason: 'linked GJC session not found' }) };
+  }
+  const log = await readSessionLog(session);
+  const message = latestGjcAssistantMessage(log);
+  const parsed = parseGjcClarifyRequest(message?.text || '');
+  if (!parsed.ok) {
+    return { status: parsed.status === 404 ? 404 : 409, body: clarifyResponse('blocked', null, { reason: parsed.reason, error: parsed.error || null }) };
+  }
+
+  const request = parsed.request;
+  const observed = observedClarifyMetadata({ workflow, session, message });
+  const questionId = gjcClarifyQuestionId(workflow.workflowId, request.clarifyId);
+  const auto = resolveGjcClarifyAutoAnswer(request, workflow, observed);
+  const questionBody = {
+    questionId,
+    kind: GJC_CLARIFY_KIND,
+    question: request.question,
+    type: request.type,
+    options: request.options,
+    allow_other: request.allow_other,
+    other_label: request.other_label,
+    source: GJC_CLARIFY_BACKEND,
+    metadata: {
+      gjcClarify: compactObject({
+        version: 1,
+        workflowId: workflow.workflowId,
+        clarifyId: request.clarifyId,
+        classificationHint: request.classificationHint,
+        requestedFacts: request.requestedFacts,
+        reason: request.reason,
+        raw: request.raw,
+        latestEventId: observed.latestEventId,
+        sourceLogPath: observed.sourceLogPath,
+        answerSource: auto.ok ? 'auto-fact' : null,
+        evidence: auto.ok ? auto.evidence : null,
+      }),
+    },
+  };
+  const question = await dispatchQuestionRequest({ session, body: questionBody, projectRoot });
+  if (!question.result.ok) {
+    return { status: question.status, body: clarifyResponse('blocked', null, { reason: question.result.error }) };
+  }
+  if (!auto.ok) {
+    return {
+      status: 202,
+      body: clarifyResponse('question-pending', question.result.record, { render: 'hermes-clarify-required', reason: auto.reason }),
+    };
+  }
+
+  const idempotencyKey = `gjc-clarify:${workflow.workflowId}:${request.clarifyId}:auto-fact`;
+  const answerBody = answerBodyForGjcClarify({
+    questionId,
+    answer: auto.answer,
+    type: request.type,
+    options: request.options,
+    idempotencyKey,
+    source: 'bridge-gjc-clarify-auto',
+  });
+  if (!answerBody.ok) {
+    return {
+      status: 202,
+      body: clarifyResponse('question-pending', question.result.record, { render: 'hermes-clarify-required', reason: answerBody.reason }),
+    };
+  }
+  const answer = await dispatchQuestionAnswer({
+    session,
+    body: answerBody.body,
+    projectRoot,
+    lockManager,
+    options: { ...options, gjcClarifyAutoAnswer: true },
+  });
+  const status = answer.delivery?.ok
+    ? (answer.delivery.status === 'already-finalized' ? 'already-finalized' : 'auto-answered')
+    : (answer.delivery?.status === 'dispatch-status-unknown' ? 'dispatch-status-unknown' : 'dispatch-failed');
+  return {
+    status: answer.status,
+    body: clarifyResponse(status, question.result.record, {
+      answer: answer.result.record,
+      dispatch: answer.delivery,
+      gjcClarify: answer.gjcClarify,
+    }),
+  };
 }
 
 async function sendAuditRoute({ req, res, url, projectRoot, json }) {
@@ -746,7 +1118,7 @@ async function sendGjcSessionsRoute({ req, res, parts, projectRoot, options, loc
   }
 }
 
-async function sendGjcWorkflowsRoute({ req, res, parts, projectRoot, options, lockManager, json }) {
+async function sendGjcWorkflowsRoute({ req, res, parts, projectRoot, options, indexOptions, lockManager, json }) {
   if (!(parts[0] === 'gjc' && parts[1] === 'workflows')) return false;
 
   if (req.method === 'POST' && parts.length === 2) {
@@ -784,6 +1156,30 @@ async function sendGjcWorkflowsRoute({ req, res, parts, projectRoot, options, lo
   if (req.method === 'GET' && parts.length === 3) {
     const result = await getGjcWorkflow(parts[2], { ...options, projectRoot });
     json(res, result.status, result.ok ? { workflow: result.workflow } : { error: result.error });
+    return true;
+  }
+
+  if (req.method === 'POST' && parts[3] === 'clarify' && parts.length === 4) {
+    const workflowResult = await getGjcWorkflow(parts[2], { ...options, projectRoot });
+    if (!workflowResult.ok) {
+      json(res, workflowResult.status, { error: workflowResult.error });
+      return true;
+    }
+    const session = await workflowGjcSession(workflowResult.workflow, indexOptions || {});
+    const result = await handleGjcWorkflowClarify({
+      workflow: workflowResult.workflow,
+      session,
+      projectRoot,
+      lockManager,
+      options,
+    });
+    await appendAudit(`gjc.workflow.clarify.${result.body.clarify.status}`, {
+      workflowId: parts[2],
+      status: result.body.clarify.status,
+      questionId: result.body.clarify.question?.questionId || null,
+      reason: result.body.clarify.reason || null,
+    }, { projectRoot });
+    json(res, result.status, result.body);
     return true;
   }
 
@@ -1002,6 +1398,7 @@ async function sendQuestionAnswerRoute({ req, res, session, projectRoot, lockMan
     questionAnswer: result.result.record,
     duplicate: result.result.duplicate === true,
     ...(result.approval ? { approval: result.approval } : {}),
+    ...(result.gjcClarify ? { gjcClarify: result.gjcClarify } : {}),
     ...(result.interaction ? { interaction: result.interaction } : {}),
     delivery: result.delivery || {
       ok: true,
