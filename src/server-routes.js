@@ -91,7 +91,15 @@ async function readJsonBody(req) {
   for await (const chunk of req) chunks.push(chunk);
   const raw = Buffer.concat(chunks).toString('utf8');
   if (!raw.trim()) return {};
-  return JSON.parse(raw);
+  try {
+    return JSON.parse(raw);
+  } catch (cause) {
+    const error = new Error('invalid_json');
+    error.status = 400;
+    error.code = 'invalid_json';
+    error.cause = cause;
+    throw error;
+  }
 }
 
 function publicSession(session) {

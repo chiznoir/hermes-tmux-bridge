@@ -83,6 +83,18 @@ test('raw HTTP JSON responses preserve pretty body, content-type, content-length
   assert.equal(method.status, 405);
   assert.equal(method.text, prettyJson({ error: 'method_not_allowed' }));
   assert.equal(Number(method.headers.get('content-length')), Buffer.byteLength(method.text));
+
+  const invalidJson = await requestRaw(createServer(authServerOptions), '/projects/project-a/channel', {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer secret-token',
+      'content-type': 'application/json',
+    },
+    body: '{"commandText":',
+  });
+  assert.equal(invalidJson.status, 400);
+  assert.equal(invalidJson.text, prettyJson({ error: 'invalid_json', message: 'invalid_json' }));
+  assert.equal(Number(invalidJson.headers.get('content-length')), Buffer.byteLength(invalidJson.text));
 });
 
 test('helper CLI scripts keep bridge API selection and payload contracts visible', async () => {

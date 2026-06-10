@@ -121,6 +121,10 @@ function createRouter(options = {}) {
       if (isMutatingMethod(req.method)) return methodNotAllowed(res);
       return notFound(res);
     } catch (error) {
+      const status = Number.isInteger(error?.status) ? error.status : 500;
+      if (status >= 400 && status < 500 && error?.code) {
+        return json(res, status, { error: error.code, message: error?.message || String(error) });
+      }
       return json(res, 500, { error: 'internal_error', message: error?.message || String(error) });
     }
   };
