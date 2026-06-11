@@ -2084,7 +2084,7 @@ test('pollHermesWebhookNotifications holds GJC FinalAnswer until fast lifecycle 
   const mapPath = join(root, 'project-channels.json');
   const project = root.split('/').pop();
   const sessionId = '019e9000-7070-7000-aaaa-ffffffffffff';
-  const baseMs = Date.now() - 3000;
+  const baseMs = Date.now() - 30000;
   const startedAt = new Date(baseMs).toISOString();
   const userAt = new Date(baseMs + 1000).toISOString();
   const finalAt = new Date(baseMs + 2000).toISOString();

@@ -522,8 +522,21 @@ export function pendingEvents(db, sink, options = {}) {
     const missingDeliveryCutoffMs = Number.isFinite(missingDeliveryGraceMs) && missingDeliveryGraceMs >= 0
       ? (Number.isFinite(nowMs) ? nowMs : Date.now()) - missingDeliveryGraceMs
       : Number.NaN;
-    const appliesClause = appliesToEventTypes.length > 0
-      ? `e.event_type NOT IN (${placeholders(appliesToEventTypes)}) OR `
+    const appliesPredicates = [];
+    const appliesParams = [];
+    if (appliesToEventTypes.length > 0) {
+      appliesPredicates.push(`e.event_type IN (${placeholders(appliesToEventTypes)})`);
+      appliesParams.push(...appliesToEventTypes);
+    }
+    if (block.gjcOnly === true) {
+      appliesPredicates.push(`(
+        json_extract(e.session_json, '$.backend') = 'gjc'
+        OR json_extract(e.session_json, '$.lifecycleOwner') = 'gjc'
+        OR json_extract(e.session_json, '$.gjcSessionId') IS NOT NULL
+      )`);
+    }
+    const appliesClause = appliesPredicates.length > 0
+      ? `NOT (${appliesPredicates.join(' AND ')}) OR `
       : '';
     clauses.push(`(${appliesClause}NOT EXISTS (
       SELECT 1
@@ -546,7 +559,7 @@ export function pendingEvents(db, sink, options = {}) {
         )
     ))`);
     params.push(
-      ...appliesToEventTypes,
+      ...appliesParams,
       blockSink,
       ...blockEventTypes,
       Number.isFinite(missingDeliveryCutoffMs) ? missingDeliveryCutoffMs : null,

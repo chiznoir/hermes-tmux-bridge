@@ -50,7 +50,6 @@ import { deliveryFailureAlertMessage, deliveryFailureErrorMessage } from './deli
 import { DISCORD_SAFE_MESSAGE_CHARS } from './delivery-text.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 250;
-const DEFAULT_TERMINAL_LIFECYCLE_BLOCK_MS = 10000;
 const MIN_POLL_INTERVAL_MS = 250;
 const DEFAULT_EVENT_TYPES = new Set(['AskPermission', 'FinalAnswer']);
 const DEFAULT_MAX_EVENTS_PER_POLL = 3;
@@ -99,22 +98,34 @@ function priorTerminalLifecycleDeliveryBlocks(options = {}) {
     ? options.priorTerminalLifecycleDeliveryBlocks
     : process.env.BRIDGE_HERMES_TERMINAL_LIFECYCLE_BLOCK;
   if (!isTruthyEnv(enabled, true)) return [];
-  const parsedGraceMs = Number.parseInt(
-    process.env.BRIDGE_HERMES_TERMINAL_LIFECYCLE_WAIT_MS ?? options.priorTerminalLifecycleGraceMs,
-    10,
-  );
+  const graceValue = process.env.BRIDGE_HERMES_TERMINAL_LIFECYCLE_WAIT_MS ?? options.priorTerminalLifecycleGraceMs;
+  const parsedGraceMs = Number.parseInt(graceValue, 10);
   return [{
     sink: options.lifecycleDeliverySink || process.env.BRIDGE_HERMES_LIFECYCLE_SINK || 'discord-fast',
     eventTypes: new Set(['SessionStart', 'CommandSubmitted']),
     appliesToEventTypes: new Set(['FinalAnswer', 'AgentResponse', 'SessionEnd', 'SessionIdle']),
+    gjcOnly: true,
     missingDeliveryGraceMs: Number.isFinite(parsedGraceMs) && parsedGraceMs >= 0
       ? parsedGraceMs
-      : DEFAULT_TERMINAL_LIFECYCLE_BLOCK_MS,
+      : null,
   }];
 }
 
 function eventMatchesPriorDeliveryBlocker(event = {}, blocks = []) {
   return blocks.some((block) => [...(block?.eventTypes || [])].includes(event.type));
+}
+
+function isGjcSession(session = {}) {
+  return session.backend === 'gjc'
+    || session.lifecycleOwner === 'gjc'
+    || Boolean(session.gjcSessionId);
+}
+
+function isTerminalEvent(event = {}) {
+  return event.type === 'FinalAnswer'
+    || event.type === 'AgentResponse'
+    || event.type === 'SessionEnd'
+    || event.type === 'SessionIdle';
 }
 
 function eventSortKey(event = {}) {
@@ -1013,6 +1024,7 @@ export async function pollHermesWebhookNotifications(options = {}) {
     let skippedNoChannel = 0;
     const indexItems = [];
     const skippedIndexRepairItems = [];
+    let terminalLifecycleBlocksNeeded = false;
     const cursorOptions = shouldUseCodexLogCursorForPoll(allowedEventTypes)
       ? options
       : { ...options, useCodexLogCursor: false };
@@ -1027,7 +1039,9 @@ export async function pollHermesWebhookNotifications(options = {}) {
       const events = await Promise.all(cursorFilteredEvents.map((event) => spoolEventBodyIfNeeded(event, options)));
       for (const event of events) {
         const forward = shouldForwardToHermes(event, { ...options, eventTypes: allowedEventTypes }, session);
-        if (!forward && !eventMatchesPriorDeliveryBlocker(event, priorDeliveryBlocks)) continue;
+        const gjc = isGjcSession(session);
+        if (forward && gjc && isTerminalEvent(event)) terminalLifecycleBlocksNeeded = true;
+        if (!forward && !(gjc && eventMatchesPriorDeliveryBlocker(event, priorDeliveryBlocks))) continue;
         const eventId = normalizeEventId(session, event);
         if (sentIds.has(eventId) && !indexedLegacySentIds.has(eventId)) continue;
         const eventMs = Date.parse(event.timestamp || '');
@@ -1059,7 +1073,7 @@ export async function pollHermesWebhookNotifications(options = {}) {
     });
     const pending = pendingEvents(index.db, 'hermes', {
       eventTypes: allowedEventTypes,
-      priorDeliveryBlocks,
+      priorDeliveryBlocks: terminalLifecycleBlocksNeeded ? priorDeliveryBlocks : [],
       limit: Math.max(1, maxEventsPerPoll) * 10,
       skipBefore,
     });
