@@ -90,6 +90,7 @@ The bridge is designed for same-host use and binds to `127.0.0.1` by default. It
 - Set `OMX_BRIDGE_TOKEN` before exposing the bridge through Docker, LAN, reverse proxy, or the public internet.
 - Never commit `.env`, webhook URLs, Discord bot tokens, generated secret files, or local state directories.
 - Prefer installer `--token-file` and `--secret-file` options so secrets do not land in shell history.
+- Before pushing, scan the tree for real env values, bearer tokens, API keys, webhook URLs, and private key material. Documentation may show placeholder values only, such as `<secret>`, `<discord-bot-token>`, or `test-token`.
 
 ## Documentation
 

@@ -2,6 +2,11 @@
 .env
 .env.*
 !.env.example
+*.token
+*.secret
+*.credentials
+*.pem
+*.key
 
 # Local agent/runtime workspaces
 AGENTS.md

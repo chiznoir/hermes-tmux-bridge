@@ -179,3 +179,5 @@ tmux display-message -pt <tmux-session>:0 '#{session_name}|#{pane_current_path}|
 - Docker/LAN/reverse proxy/public 노출이면 `OMX_BRIDGE_TOKEN`을 필수로 둡니다.
 - webhook secret, bot token, channel/user ID가 들어간 운영 env 파일은 commit하지 않습니다.
 - `.env`, `~/.config/hermes-tmux-bridge/*.env`, secret files는 로컬 운영 파일입니다.
+- push 전 점검은 source tree 기준으로 수행합니다. author 개인 이메일 같은 git metadata를 제외하고, 실제 env 값, bearer token, API key, webhook URL, private key material이 나오면 push 전에 제거합니다.
+- 문서와 테스트에는 placeholder/test 값만 허용합니다. 예: `<secret>`, `<discord-bot-token>`, `test-token`, `dummy-bot-token`, `secret-token`.
