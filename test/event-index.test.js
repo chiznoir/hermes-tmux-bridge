@@ -706,6 +706,76 @@ test('pendingEvents only grace-holds missing prior delivery rows briefly', async
 });
 
 
+
+test('pendingEvents can scope prior delivery blocks to selected current event types', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-scoped-prior-delivery-'));
+  const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
+  try {
+    const session = { bridgeSessionId: 'bridge-scoped', project: 'omx-bridge' };
+    upsertEvents(index.db, [
+      {
+        session,
+        event: {
+          eventId: 'start-before-command',
+          type: 'SessionStart',
+          source: 'notification',
+          timestamp: '2026-06-11T01:00:00.000Z',
+        },
+      },
+      {
+        session,
+        event: {
+          eventId: 'command-not-held',
+          type: 'CommandSubmitted',
+          source: 'gjc-log',
+          timestamp: '2026-06-11T01:00:01.000Z',
+          text: 'hello',
+        },
+      },
+      {
+        session,
+        event: {
+          eventId: 'final-held',
+          type: 'FinalAnswer',
+          source: 'gjc-log',
+          phase: 'final_answer',
+          timestamp: '2026-06-11T01:00:02.000Z',
+          text: 'done',
+        },
+      },
+    ]);
+    const block = {
+      sink: 'discord-fast',
+      eventTypes: new Set(['SessionStart']),
+      appliesToEventTypes: new Set(['FinalAnswer']),
+      missingDeliveryGraceMs: 10000,
+    };
+
+    assert.deepEqual(
+      pendingEvents(index.db, 'hermes', {
+        eventTypes: new Set(['CommandSubmitted', 'FinalAnswer']),
+        priorDeliveryBlocks: [block],
+        now: '2026-06-11T01:00:03.000Z',
+        limit: 10,
+      }).map((item) => item.eventId),
+      ['command-not-held'],
+    );
+
+    markDeliverySent(index.db, 'start-before-command', 'discord-fast');
+    assert.deepEqual(
+      pendingEvents(index.db, 'hermes', {
+        eventTypes: new Set(['CommandSubmitted', 'FinalAnswer']),
+        priorDeliveryBlocks: [block],
+        now: '2026-06-11T01:00:03.000Z',
+        limit: 10,
+      }).map((item) => item.eventId),
+      ['command-not-held', 'final-held'],
+    );
+  } finally {
+    closeEventIndex(index);
+  }
+});
+
 test('markSkippedBeforeDeliveries makes boot-cutoff skips observable and non-pending', async () => {
   const root = await mkdtemp(join(tmpdir(), 'omx-event-index-skipped-before-'));
   const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });

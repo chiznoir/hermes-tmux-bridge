@@ -50,6 +50,7 @@ import { deliveryFailureAlertMessage, deliveryFailureErrorMessage } from './deli
 import { DISCORD_SAFE_MESSAGE_CHARS } from './delivery-text.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 250;
+const DEFAULT_TERMINAL_LIFECYCLE_BLOCK_MS = 10000;
 const MIN_POLL_INTERVAL_MS = 250;
 const DEFAULT_EVENT_TYPES = new Set(['AskPermission', 'FinalAnswer']);
 const DEFAULT_MAX_EVENTS_PER_POLL = 3;
@@ -91,6 +92,29 @@ function eventTypesFromEnv() {
   const raw = process.env.BRIDGE_HERMES_WEBHOOK_EVENT_TYPES || '';
   const values = raw.split(',').map((value) => value.trim()).filter(Boolean);
   return values.length > 0 ? new Set(values) : DEFAULT_EVENT_TYPES;
+}
+
+function priorTerminalLifecycleDeliveryBlocks(options = {}) {
+  const enabled = Object.prototype.hasOwnProperty.call(options, 'priorTerminalLifecycleDeliveryBlocks')
+    ? options.priorTerminalLifecycleDeliveryBlocks
+    : process.env.BRIDGE_HERMES_TERMINAL_LIFECYCLE_BLOCK;
+  if (!isTruthyEnv(enabled, true)) return [];
+  const parsedGraceMs = Number.parseInt(
+    process.env.BRIDGE_HERMES_TERMINAL_LIFECYCLE_WAIT_MS ?? options.priorTerminalLifecycleGraceMs,
+    10,
+  );
+  return [{
+    sink: options.lifecycleDeliverySink || process.env.BRIDGE_HERMES_LIFECYCLE_SINK || 'discord-fast',
+    eventTypes: new Set(['SessionStart', 'CommandSubmitted']),
+    appliesToEventTypes: new Set(['FinalAnswer', 'AgentResponse', 'SessionEnd', 'SessionIdle']),
+    missingDeliveryGraceMs: Number.isFinite(parsedGraceMs) && parsedGraceMs >= 0
+      ? parsedGraceMs
+      : DEFAULT_TERMINAL_LIFECYCLE_BLOCK_MS,
+  }];
+}
+
+function eventMatchesPriorDeliveryBlocker(event = {}, blocks = []) {
+  return blocks.some((block) => [...(block?.eventTypes || [])].includes(event.type));
 }
 
 function eventSortKey(event = {}) {
@@ -960,6 +984,7 @@ export async function pollHermesWebhookNotifications(options = {}) {
     let channelMap = await loadProjectChannelMap(options);
     const maxEventsPerPoll = Number.parseInt(process.env.BRIDGE_HERMES_WEBHOOK_MAX_EVENTS_PER_POLL || `${options.maxEventsPerPoll || DEFAULT_MAX_EVENTS_PER_POLL}`, 10);
     const allowedEventTypes = options.eventTypes || eventTypesFromEnv();
+    const priorDeliveryBlocks = priorTerminalLifecycleDeliveryBlocks(options);
     let sent = 0;
     let skippedNoChannel = 0;
     const indexItems = [];
@@ -977,7 +1002,8 @@ export async function pollHermesWebhookNotifications(options = {}) {
       const cursorFilteredEvents = filterEventsByCodexLogCursor(index.db, session, routedEvents, cursorOptions);
       const events = await Promise.all(cursorFilteredEvents.map((event) => spoolEventBodyIfNeeded(event, options)));
       for (const event of events) {
-        if (!shouldForwardToHermes(event, { ...options, eventTypes: allowedEventTypes }, session)) continue;
+        const forward = shouldForwardToHermes(event, { ...options, eventTypes: allowedEventTypes }, session);
+        if (!forward && !eventMatchesPriorDeliveryBlocker(event, priorDeliveryBlocks)) continue;
         const eventId = normalizeEventId(session, event);
         if (sentIds.has(eventId) && !indexedLegacySentIds.has(eventId)) continue;
         const eventMs = Date.parse(event.timestamp || '');
@@ -1009,6 +1035,7 @@ export async function pollHermesWebhookNotifications(options = {}) {
     });
     const pending = pendingEvents(index.db, 'hermes', {
       eventTypes: allowedEventTypes,
+      priorDeliveryBlocks,
       limit: Math.max(1, maxEventsPerPoll) * 10,
       skipBefore,
     });

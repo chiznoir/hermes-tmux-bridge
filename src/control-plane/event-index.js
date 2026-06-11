@@ -515,13 +515,17 @@ export function pendingEvents(db, sink, options = {}) {
   for (const block of options.priorDeliveryBlocks || []) {
     const blockSink = String(block?.sink || '').trim();
     const blockEventTypes = [...(block?.eventTypes || [])].filter(Boolean);
+    const appliesToEventTypes = [...(block?.appliesToEventTypes || [])].filter(Boolean);
     if (!blockSink || blockEventTypes.length === 0) continue;
     const missingDeliveryGraceMs = Number.parseInt(block.missingDeliveryGraceMs, 10);
     const nowMs = Date.parse(now);
     const missingDeliveryCutoffMs = Number.isFinite(missingDeliveryGraceMs) && missingDeliveryGraceMs >= 0
       ? (Number.isFinite(nowMs) ? nowMs : Date.now()) - missingDeliveryGraceMs
       : Number.NaN;
-    clauses.push(`NOT EXISTS (
+    const appliesClause = appliesToEventTypes.length > 0
+      ? `e.event_type NOT IN (${placeholders(appliesToEventTypes)}) OR `
+      : '';
+    clauses.push(`(${appliesClause}NOT EXISTS (
       SELECT 1
       FROM events block_event
       LEFT JOIN deliveries block_delivery
@@ -540,8 +544,9 @@ export function pendingEvents(db, sink, options = {}) {
             AND (? IS NULL OR block_event.timestamp_ms >= ?)
           )
         )
-    )`);
+    ))`);
     params.push(
+      ...appliesToEventTypes,
       blockSink,
       ...blockEventTypes,
       Number.isFinite(missingDeliveryCutoffMs) ? missingDeliveryCutoffMs : null,
