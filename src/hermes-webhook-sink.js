@@ -20,6 +20,10 @@ import {
   pendingEvents,
   upsertEvents,
   filterEventsByCodexLogCursor,
+  getGjcLogCursor,
+  advanceGjcLogCursor,
+  shouldUseGjcLogCursorForPoll,
+  recordGjcLogCursorError,
 } from './control-plane/event-index.js';
 import { ensureDirFor } from './jsonl.js';
 import {
@@ -119,6 +123,10 @@ function isGjcSession(session = {}) {
   return session.backend === 'gjc'
     || session.lifecycleOwner === 'gjc'
     || Boolean(session.gjcSessionId);
+}
+
+function isActiveGjcSession(session = {}) {
+  return session.status === 'active' || Boolean(session.tmuxId || session.tmuxPaneId || session.gjcProfile === '1');
 }
 
 function isTerminalEvent(event = {}) {
@@ -1028,13 +1036,28 @@ export async function pollHermesWebhookNotifications(options = {}) {
     const cursorOptions = shouldUseCodexLogCursorForPoll(allowedEventTypes)
       ? options
       : { ...options, useCodexLogCursor: false };
+    const useGjcLogCursor = shouldUseGjcLogCursorForPoll(allowedEventTypes, options);
+    const gjcLogCursorUpdates = [];
 
     for (const session of sessions) {
-      const routedEvents = await routeSessionEvents(session, {
-        ...options,
-        projectRoot: session.omxProjectRoot || projectRoot,
-        bridgeProjectRoot: projectRoot,
-      });
+      const gjcCursorMode = useGjcLogCursor && isGjcSession(session) && isActiveGjcSession(session) && Boolean(session.sessionLogPath);
+      let routedEvents;
+      try {
+        routedEvents = await routeSessionEvents(session, {
+          ...options,
+          projectRoot: session.omxProjectRoot || projectRoot,
+          bridgeProjectRoot: projectRoot,
+          pollGjcLogCursorMode: gjcCursorMode,
+          gjcLogCursor: gjcCursorMode ? getGjcLogCursor(index.db, session.sessionLogPath) : null,
+          gjcLogCursorUpdates,
+        });
+      } catch (error) {
+        if (gjcCursorMode && error?.code === 'GJC_LOG_MALFORMED_JSONL') {
+          recordGjcLogCursorError(index.db, session.sessionLogPath, error);
+          console.error('[bridge-hermes-webhook-sink]', `GJC cursor parse failed for ${session.sessionLogPath}: ${error.message}`);
+        }
+        throw error;
+      }
       const cursorFilteredEvents = filterEventsByCodexLogCursor(index.db, session, routedEvents, cursorOptions);
       const events = await Promise.all(cursorFilteredEvents.map((event) => spoolEventBodyIfNeeded(event, options)));
       for (const event of events) {
@@ -1066,6 +1089,7 @@ export async function pollHermesWebhookNotifications(options = {}) {
       indexItems.push(...skippedIndexRepairItems.filter((item) => existingSkippedIds.has(item.eventId)));
     }
     upsertEvents(index.db, indexItems);
+    for (const update of gjcLogCursorUpdates) advanceGjcLogCursor(index.db, update.cursor);
     markSkippedBeforeDeliveries(index.db, 'hermes', {
       ...options,
       eventTypes: allowedEventTypes,

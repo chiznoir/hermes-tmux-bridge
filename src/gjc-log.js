@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { stat } from 'node:fs/promises';
+import { open, stat } from 'node:fs/promises';
 import { listFilesRecursive, readJsonlStreaming } from './jsonl.js';
 
 function asString(value) {
@@ -84,8 +84,8 @@ function assistantPhase(record = {}, message = {}, content = []) {
   return 'commentary';
 }
 
-export async function readGjcLog(filePath) {
-  const meta = {
+function emptyGjcLog(filePath) {
+  return {
     gjcSessionId: null,
     threadId: null,
     startedAt: null,
@@ -94,43 +94,146 @@ export async function readGjcLog(filePath) {
     version: null,
     sessionLogPath: filePath,
     lastEventAt: null,
+    messages: [],
   };
-  const messages = [];
+}
 
-  await readJsonlStreaming(filePath, (record, lineNumber) => {
-    const timestamp = asString(record.timestamp);
-    if (timestamp) meta.lastEventAt = timestamp;
+function applyGjcRecord(log, record, lineNumber) {
+  const timestamp = asString(record.timestamp);
+  if (timestamp) log.lastEventAt = timestamp;
 
-    if (record.type === 'session') {
-      meta.gjcSessionId = asString(record.id) || meta.gjcSessionId;
-      meta.threadId = meta.gjcSessionId || meta.threadId;
-      meta.startedAt = timestamp || asString(record.startedAt) || meta.startedAt;
-      meta.cwd = asString(record.cwd) || meta.cwd;
-      meta.title = asString(record.title) || meta.title;
-      meta.version = Number.isFinite(record.version) ? record.version : meta.version;
-      return;
+  if (record.type === 'session') {
+    log.gjcSessionId = asString(record.id) || log.gjcSessionId;
+    log.threadId = log.gjcSessionId || log.threadId;
+    log.startedAt = timestamp || asString(record.startedAt) || log.startedAt;
+    log.cwd = asString(record.cwd) || log.cwd;
+    log.title = asString(record.title) || log.title;
+    log.version = Number.isFinite(record.version) ? record.version : log.version;
+    return;
+  }
+
+  if (record.type !== 'message' || !record.message || typeof record.message !== 'object') return;
+  const message = record.message;
+  const role = asString(message.role);
+  if (!role) return;
+  const content = Array.isArray(message.content) ? message.content : [];
+  const text = collectText(content).join('\n').trim();
+  log.messages.push({
+    id: asString(record.id) || `message-${lineNumber}`,
+    role,
+    timestamp,
+    text,
+    phase: role === 'assistant' ? assistantPhase(record, message, content) : null,
+    stopReason: asString(record.stopReason) || asString(message.stopReason),
+    hasToolCall: content.some((item) => item?.type === 'toolCall'),
+    hasThinking: content.some((item) => item?.type === 'thinking'),
+    lineNumber,
+  });
+}
+
+export async function readGjcLog(filePath) {
+  const log = emptyGjcLog(filePath);
+  await readJsonlStreaming(filePath, (record, lineNumber) => applyGjcRecord(log, record, lineNumber));
+  return log;
+}
+
+function cursorByteOffset(cursor = {}) {
+  const value = cursor.byteOffset ?? cursor.byte_offset ?? 0;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function cursorLineNumber(cursor = {}) {
+  const value = cursor.lineNumber ?? cursor.line_number ?? 0;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function parseGjcDeltaLine(lineText, context) {
+  if (!lineText || lineText.trim() === '') return null;
+  try {
+    const parsed = JSON.parse(lineText);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (cause) {
+    const error = new Error(`Malformed GJC JSONL at ${context.filePath}:${context.byteOffset}`);
+    error.name = 'GjcLogParseError';
+    error.code = 'GJC_LOG_MALFORMED_JSONL';
+    error.filePath = context.filePath;
+    error.byteOffset = context.byteOffset;
+    error.lastGoodOffset = context.lastGoodOffset;
+    error.cause = cause;
+    throw error;
+  }
+}
+
+export async function readGjcLogDelta(filePath, cursor = {}) {
+  const handle = await open(filePath, 'r');
+  try {
+    const fileStat = await handle.stat();
+    const fileSize = fileStat.size;
+    const fileMtime = new Date(fileStat.mtimeMs).toISOString();
+    const requestedOffset = cursorByteOffset(cursor);
+    const reset = requestedOffset > fileSize || Number.parseInt(cursor.file_size ?? cursor.fileSize ?? 0, 10) > fileSize;
+    const startOffset = reset ? 0 : requestedOffset;
+    const byteLength = Math.max(0, fileSize - startOffset);
+    const buffer = Buffer.alloc(byteLength);
+    if (byteLength > 0) await handle.read(buffer, 0, byteLength, startOffset);
+
+    const log = emptyGjcLog(filePath);
+    let position = 0;
+    let lastGoodOffset = startOffset;
+    let lineNumber = reset ? 0 : cursorLineNumber(cursor);
+    let lastGoodLineNumber = lineNumber;
+    let partial = null;
+
+    while (position < buffer.length) {
+      const newline = buffer.indexOf(0x0a, position);
+      const hasNewline = newline !== -1;
+      const lineEnd = hasNewline ? newline : buffer.length;
+      const lineBuffer = buffer.subarray(position, lineEnd);
+      const byteOffset = startOffset + position;
+      const nextOffset = startOffset + lineEnd + (hasNewline ? 1 : 0);
+      const lineText = lineBuffer.toString('utf8').replace(/\r$/, '');
+
+      if (!hasNewline) {
+        try {
+          const currentLineNumber = lineNumber + 1;
+          const parsed = parseGjcDeltaLine(lineText, { filePath, byteOffset, lastGoodOffset });
+          if (parsed) applyGjcRecord(log, parsed, currentLineNumber);
+          lineNumber = currentLineNumber;
+          lastGoodLineNumber = currentLineNumber;
+          lastGoodOffset = nextOffset;
+        } catch (error) {
+          partial = { byteOffset, bytes: fileSize - byteOffset };
+        }
+        break;
+      }
+
+      const currentLineNumber = lineNumber + 1;
+      const parsed = parseGjcDeltaLine(lineText, { filePath, byteOffset, lastGoodOffset });
+      if (parsed) applyGjcRecord(log, parsed, currentLineNumber);
+      lineNumber = currentLineNumber;
+      lastGoodLineNumber = currentLineNumber;
+      lastGoodOffset = nextOffset;
+      position = nextOffset - startOffset;
     }
 
-    if (record.type !== 'message' || !record.message || typeof record.message !== 'object') return;
-    const message = record.message;
-    const role = asString(message.role);
-    if (!role) return;
-    const content = Array.isArray(message.content) ? message.content : [];
-    const text = collectText(content).join('\n').trim();
-    messages.push({
-      id: asString(record.id) || `message-${lineNumber}`,
-      role,
-      timestamp,
-      text,
-      phase: role === 'assistant' ? assistantPhase(record, message, content) : null,
-      stopReason: asString(record.stopReason) || asString(message.stopReason),
-      hasToolCall: content.some((item) => item?.type === 'toolCall'),
-      hasThinking: content.some((item) => item?.type === 'thinking'),
-      lineNumber,
-    });
-  });
-
-  return { ...meta, messages };
+    return {
+      ...log,
+      partial,
+      reset,
+      cursor: {
+        logPath: filePath,
+        byteOffset: lastGoodOffset,
+        lineNumber: lastGoodLineNumber,
+        fileSize,
+        fileMtime,
+        gjcSessionId: log.gjcSessionId || cursor.gjc_session_id || cursor.gjcSessionId || null,
+      },
+    };
+  } finally {
+    await handle.close();
+  }
 }
 
 export function latestGjcAssistantMessage(log = {}) {

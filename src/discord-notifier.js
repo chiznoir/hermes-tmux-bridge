@@ -17,6 +17,10 @@ import {
   openEventIndex,
   pendingEvents,
   upsertEvents,
+  getGjcLogCursor,
+  advanceGjcLogCursor,
+  shouldUseGjcLogCursorForPoll,
+  recordGjcLogCursorError,
 } from './control-plane/event-index.js';
 import { ensureDirFor } from './jsonl.js';
 import { formatDuration } from './duration.js';
@@ -218,6 +222,16 @@ function allowedMentionsForEvent(event = {}, options = {}) {
     if (users.length > 0) return { users };
   }
   return { parse: [] };
+}
+
+function isGjcSession(session = {}) {
+  return session.backend === 'gjc'
+    || session.lifecycleOwner === 'gjc'
+    || Boolean(session.gjcSessionId);
+}
+
+function isActiveGjcSession(session = {}) {
+  return session.status === 'active' || Boolean(session.tmuxId || session.tmuxPaneId || session.gjcProfile === '1');
 }
 
 function shouldPollSession(session = {}, options = {}) {
@@ -904,13 +918,28 @@ export async function pollDiscordNotifications(options = {}) {
     let failed = 0;
     const indexItems = [];
     const skippedIndexRepairItems = [];
+    const useGjcLogCursor = shouldUseGjcLogCursorForPoll(allowedEventTypes, options);
+    const gjcLogCursorUpdates = [];
 
     for (const session of sessions) {
-      const events = await routeSessionEvents(session, {
-        ...options,
-        projectRoot: session.omxProjectRoot || projectRoot,
-        bridgeProjectRoot: projectRoot,
-      });
+      const gjcCursorMode = useGjcLogCursor && isGjcSession(session) && isActiveGjcSession(session) && Boolean(session.sessionLogPath);
+      let events;
+      try {
+        events = await routeSessionEvents(session, {
+          ...options,
+          projectRoot: session.omxProjectRoot || projectRoot,
+          bridgeProjectRoot: projectRoot,
+          pollGjcLogCursorMode: gjcCursorMode,
+          gjcLogCursor: gjcCursorMode ? getGjcLogCursor(index.db, session.sessionLogPath) : null,
+          gjcLogCursorUpdates,
+        });
+      } catch (error) {
+        if (gjcCursorMode && error?.code === 'GJC_LOG_MALFORMED_JSONL') {
+          recordGjcLogCursorError(index.db, session.sessionLogPath, error);
+          console.error('[bridge-discord-notifier]', `GJC cursor parse failed for ${session.sessionLogPath}: ${error.message}`);
+        }
+        throw error;
+      }
       for (const event of events) {
         const notify = shouldNotify(event, { ...options, eventTypes: allowedEventTypes }, session);
         if (!notify && !eventMatchesPriorDeliveryBlocker(event, priorDeliveryBlocks)) continue;
@@ -938,6 +967,7 @@ export async function pollDiscordNotifications(options = {}) {
       indexItems.push(...skippedIndexRepairItems.filter((item) => existingSkippedIds.has(item.eventId)));
     }
     upsertEvents(index.db, indexItems);
+    for (const update of gjcLogCursorUpdates) advanceGjcLogCursor(index.db, update.cursor);
     markSkippedBeforeDeliveries(index.db, sink, {
       ...options,
       eventTypes: allowedEventTypes,

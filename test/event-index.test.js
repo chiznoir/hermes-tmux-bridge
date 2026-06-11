@@ -15,7 +15,70 @@ import {
   openEventIndex,
   pendingEvents,
   upsertEvents,
+  getGjcLogCursor,
+  advanceGjcLogCursor,
+  shouldUseGjcLogCursorForPoll,
+  recordGjcLogCursorError,
 } from '../src/control-plane/event-index.js';
+
+
+test('GJC log cursor gate requires lifecycle-safe event set and rejects replay', () => {
+  assert.equal(shouldUseGjcLogCursorForPoll(undefined), true);
+  assert.equal(shouldUseGjcLogCursorForPoll(new Set(['CommandSubmitted'])), false);
+  assert.equal(shouldUseGjcLogCursorForPoll(new Set(['SessionStart', 'CommandSubmitted', 'FinalAnswer', 'SessionIdle'])), false);
+  assert.equal(shouldUseGjcLogCursorForPoll(new Set(['SessionStart', 'CommandSubmitted', 'FinalAnswer', 'SessionIdle', 'SessionEnd'])), true);
+  assert.equal(shouldUseGjcLogCursorForPoll(['SessionStart', 'CommandSubmitted', 'FinalAnswer', 'SessionIdle', 'SessionEnd']), false);
+  assert.equal(shouldUseGjcLogCursorForPoll(new Set(['SessionStart', 'CommandSubmitted', 'FinalAnswer', 'SessionIdle', 'SessionEnd']), { replay: true }), false);
+});
+
+test('GJC log cursor ledger stores byte offset independently from Codex cursors', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-gjc-cursor-'));
+  const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
+  try {
+    assert.equal(getGjcLogCursor(index.db, '/tmp/gjc.jsonl'), null);
+    advanceGjcLogCursor(index.db, {
+      logPath: '/tmp/gjc.jsonl',
+      byteOffset: 123,
+      fileSize: 456,
+      fileMtime: '2026-06-04T10:00:00.000Z',
+      gjcSessionId: 'gjc-1',
+    });
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(getGjcLogCursor(index.db, '/tmp/gjc.jsonl')).filter(([key]) => ['log_path', 'byte_offset', 'line_number', 'file_size', 'file_mtime', 'gjc_session_id'].includes(key))),
+      {
+        log_path: '/tmp/gjc.jsonl',
+        byte_offset: 123,
+        line_number: 0,
+        file_size: 456,
+        file_mtime: '2026-06-04T10:00:00.000Z',
+        gjc_session_id: 'gjc-1',
+      },
+    );
+    assert.equal(index.db.prepare('SELECT COUNT(*) AS count FROM codex_log_cursors').get().count, 0);
+  } finally {
+    closeEventIndex(index);
+  }
+});
+
+test('GJC log cursor parse errors are observable in index metadata', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'omx-event-index-gjc-cursor-error-'));
+  const index = await openEventIndex(root, { eventIndexPath: join(root, 'state', 'events.sqlite') });
+  try {
+    recordGjcLogCursorError(index.db, '/tmp/bad-gjc.jsonl', {
+      code: 'GJC_LOG_MALFORMED_JSONL',
+      message: 'bad json',
+      byteOffset: 20,
+      lastGoodOffset: 10,
+    });
+    const row = index.db.prepare("SELECT value FROM index_meta WHERE key = 'gjc_log_cursor_error:/tmp/bad-gjc.jsonl'").get();
+    const parsed = JSON.parse(row.value);
+    assert.equal(parsed.code, 'GJC_LOG_MALFORMED_JSONL');
+    assert.equal(parsed.byteOffset, 20);
+    assert.equal(parsed.lastGoodOffset, 10);
+  } finally {
+    closeEventIndex(index);
+  }
+});
 
 test('normalizeEventId hashes fallback text instead of embedding large payloads', () => {
   const text = `${'대용량 프롬프트 '.repeat(400)}끝부분`;

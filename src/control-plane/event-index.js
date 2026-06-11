@@ -169,12 +169,28 @@ export function initializeEventIndex(db) {
       first_seen_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS gjc_log_cursors (
+      log_path TEXT PRIMARY KEY,
+      byte_offset INTEGER NOT NULL DEFAULT 0,
+      line_number INTEGER NOT NULL DEFAULT 0,
+      file_size INTEGER NOT NULL DEFAULT 0,
+      file_mtime TEXT,
+      gjc_session_id TEXT,
+      first_seen_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
   ensureDeliveryMetadataColumns(db);
+  ensureGjcLogCursorColumns(db);
 }
 
 function tableColumns(db, tableName) {
   return new Set(db.prepare(`PRAGMA table_info(${tableName})`).all().map((row) => row.name));
+}
+
+function ensureGjcLogCursorColumns(db) {
+  const columns = tableColumns(db, 'gjc_log_cursors');
+  if (!columns.has('line_number')) db.exec('ALTER TABLE gjc_log_cursors ADD COLUMN line_number INTEGER NOT NULL DEFAULT 0;');
 }
 
 function ensureDeliveryMetadataColumns(db) {
@@ -430,6 +446,86 @@ function cursorFilteringEnabled(options = {}) {
   if (options.replay === true) return false;
   if (options.useCodexLogCursor === false) return false;
   return !falseyEnv(process.env.BRIDGE_CODEX_LOG_CURSOR_ENABLED);
+}
+
+const GJC_CURSOR_SAFE_EVENT_TYPES = new Set([
+  'SessionStart',
+  'CommandSubmitted',
+  'FinalAnswer',
+  'SessionIdle',
+  'SessionEnd',
+]);
+
+export function shouldUseGjcLogCursorForPoll(allowedEventTypes, options = {}) {
+  if (options.replay === true) return false;
+  if (options.useGjcLogCursor === false) return false;
+  if (falseyEnv(process.env.BRIDGE_GJC_LOG_CURSOR_ENABLED)) return false;
+  if (allowedEventTypes === undefined || allowedEventTypes === null) return true;
+  if (!(allowedEventTypes instanceof Set)) return false;
+  for (const eventType of GJC_CURSOR_SAFE_EVENT_TYPES) {
+    if (!allowedEventTypes.has(eventType)) return false;
+  }
+  return true;
+}
+
+export function getGjcLogCursor(db, logPath) {
+  if (!logPath) return null;
+  return db.prepare(`
+    SELECT log_path, byte_offset, line_number, file_size, file_mtime, gjc_session_id, first_seen_at, updated_at
+    FROM gjc_log_cursors
+    WHERE log_path = ?
+  `).get(logPath) || null;
+}
+
+export function advanceGjcLogCursor(db, cursor = {}) {
+  const logPath = cursor.logPath || cursor.log_path;
+  if (!logPath) return 0;
+  const byteOffset = Number.parseInt(cursor.byteOffset ?? cursor.byte_offset ?? 0, 10);
+  const fileSize = Number.parseInt(cursor.fileSize ?? cursor.file_size ?? byteOffset, 10);
+  const lineNumber = Number.parseInt(cursor.lineNumber ?? cursor.line_number ?? 0, 10);
+  if (!Number.isFinite(byteOffset) || byteOffset < 0) return 0;
+  const now = isoNow();
+  const result = db.prepare(`
+    INSERT INTO gjc_log_cursors (
+      log_path, byte_offset, line_number, file_size, file_mtime, gjc_session_id, first_seen_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(log_path) DO UPDATE SET
+      byte_offset = excluded.byte_offset,
+      line_number = excluded.line_number,
+      file_size = excluded.file_size,
+      file_mtime = excluded.file_mtime,
+      gjc_session_id = COALESCE(excluded.gjc_session_id, gjc_log_cursors.gjc_session_id),
+      updated_at = excluded.updated_at
+  `).run(
+    logPath,
+    byteOffset,
+    Number.isFinite(lineNumber) && lineNumber >= 0 ? lineNumber : 0,
+    Number.isFinite(fileSize) && fileSize >= 0 ? fileSize : byteOffset,
+    cursor.fileMtime || cursor.file_mtime || null,
+    cursor.gjcSessionId || cursor.gjc_session_id || null,
+    now,
+    now,
+  );
+  return result.changes || 0;
+}
+
+export function recordGjcLogCursorError(db, logPath, error) {
+  if (!logPath) return 0;
+  const now = isoNow();
+  const value = JSON.stringify({
+    logPath,
+    code: error?.code || null,
+    message: error?.message || String(error || ''),
+    byteOffset: error?.byteOffset ?? null,
+    lastGoodOffset: error?.lastGoodOffset ?? null,
+    recordedAt: now,
+  });
+  const result = db.prepare(`
+    INSERT INTO index_meta (key, value)
+    VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run(`gjc_log_cursor_error:${logPath}`, value);
+  return result.changes || 0;
 }
 
 export function filterEventsByCodexLogCursor(db, session = {}, events = [], options = {}) {

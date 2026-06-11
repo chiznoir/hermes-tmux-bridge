@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { getSessionById, inferSessionKind, listSessions } from '../src/control-plane/registry.js';
@@ -10,7 +10,7 @@ import { openEventIndex, upsertEvents } from '../src/control-plane/event-index.j
 import { routeSessionEvents } from '../src/control-plane/event-router.js';
 import { buildSessionIndex } from '../src/omx.js';
 import { buildSessionIndex as buildGjcSessionIndex } from '../src/gjc.js';
-import { listGjcSessionLogPaths, readGjcLog } from '../src/gjc-log.js';
+import { listGjcSessionLogPaths, readGjcLog, readGjcLogDelta } from '../src/gjc-log.js';
 import { stripSyntheticNotificationContext } from '../src/synthetic-context.js';
 
 async function withEnv(env, fn) {
@@ -91,6 +91,80 @@ test('gjc log reader parses version 3 session headers and assistant lifecycle me
   assert.equal(log.cwd, root);
   assert.deepEqual(log.messages.filter((message) => message.role === 'assistant').map((message) => message.phase), ['commentary', 'final_answer']);
   assert.equal(log.messages.at(-1)?.text, '최종 답변입니다.');
+});
+
+test('gjc delta reader resumes by byte offset and keeps partial trailing JSON for retry', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gjc-delta-'));
+  const logPath = join(root, 'session.jsonl');
+  const session = { type: 'session', version: 3, id: 'gjc-delta-1', timestamp: '2026-06-04T10:00:00.000Z', cwd: root, title: 'Delta' };
+  const user = { type: 'message', id: 'user-1', timestamp: '2026-06-04T10:00:01.000Z', message: { role: 'user', content: [{ type: 'text', text: '첫 요청' }] } };
+  const firstContent = `${JSON.stringify(session)}
+${JSON.stringify(user)}
+`;
+  await writeFile(logPath, `${firstContent}{"type":"message","id":"assistant-`);
+
+  const first = await readGjcLogDelta(logPath, {});
+  assert.equal(first.gjcSessionId, 'gjc-delta-1');
+  assert.deepEqual(first.messages.map((message) => message.id), ['user-1']);
+  assert.equal(first.partial.byteOffset, Buffer.byteLength(firstContent));
+  assert.equal(first.cursor.byteOffset, Buffer.byteLength(firstContent));
+
+  await writeFile(logPath, `${firstContent}${JSON.stringify({
+    type: 'message',
+    id: 'assistant-1',
+    timestamp: '2026-06-04T10:00:02.000Z',
+    message: { role: 'assistant', content: [{ type: 'text', text: '완료' }] },
+    stopReason: 'stop',
+  })}`);
+  const retry = await readGjcLogDelta(logPath, first.cursor);
+  assert.deepEqual(retry.messages.map((message) => message.id), ['assistant-1']);
+  assert.equal(retry.partial, null);
+  assert.equal(retry.cursor.byteOffset, Buffer.byteLength(await readFile(logPath)));
+});
+
+test('gjc delta reader preserves full-reader fallback message ids across cursor resumes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gjc-delta-fallback-id-'));
+  const logPath = join(root, 'session.jsonl');
+  const session = { type: 'session', version: 3, id: 'gjc-fallback-id-1', timestamp: '2026-06-04T10:00:00.000Z', cwd: root };
+  const firstUser = { type: 'message', timestamp: '2026-06-04T10:00:01.000Z', message: { role: 'user', content: [{ type: 'text', text: '첫 요청' }] } };
+  const secondUser = { type: 'message', timestamp: '2026-06-04T10:00:02.000Z', message: { role: 'user', content: [{ type: 'text', text: '둘째 요청' }] } };
+  const firstContent = `${JSON.stringify(session)}
+${JSON.stringify(firstUser)}
+`;
+  await writeFile(logPath, firstContent);
+
+  const first = await readGjcLogDelta(logPath, {});
+  assert.deepEqual(first.messages.map((message) => message.id), ['message-2']);
+  assert.equal(first.cursor.lineNumber, 2);
+
+  await writeFile(logPath, `${firstContent}${JSON.stringify(secondUser)}
+`);
+  const second = await readGjcLogDelta(logPath, first.cursor);
+  const full = await readGjcLog(logPath);
+  assert.deepEqual(second.messages.map((message) => message.id), ['message-3']);
+  assert.deepEqual(full.messages.map((message) => message.id), ['message-2', 'message-3']);
+});
+
+test('gjc delta reader fails malformed non-tail JSON without advancing past last good offset', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gjc-delta-malformed-'));
+  const logPath = join(root, 'session.jsonl');
+  const firstLine = `${JSON.stringify({ type: 'session', version: 3, id: 'gjc-bad-1', timestamp: '2026-06-04T10:00:00.000Z', cwd: root })}
+`;
+  await writeFile(logPath, `${firstLine}{"type":"message", bad}
+${JSON.stringify({
+    type: 'message',
+    id: 'user-after-bad',
+    timestamp: '2026-06-04T10:00:01.000Z',
+    message: { role: 'user', content: [{ type: 'text', text: '뒤 이벤트' }] },
+  })}
+`);
+
+  await assert.rejects(
+    () => readGjcLogDelta(logPath, {}),
+    (error) => error.code === 'GJC_LOG_MALFORMED_JSONL'
+      && error.byteOffset === Buffer.byteLength(firstLine)
+      && error.lastGoodOffset === Buffer.byteLength(firstLine),
+  );
 });
 
 

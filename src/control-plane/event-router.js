@@ -1,5 +1,5 @@
 import { findCodexLogBySessionId, isAuxiliaryCodexLog, readCodexLog } from '../codex-log.js';
-import { readGjcLog } from '../gjc-log.js';
+import { readGjcLog, readGjcLogDelta } from '../gjc-log.js';
 import { readBridgeCommands } from '../interactions.js';
 import { readAuditLog, auditEventToRouterEvent } from './audit-log.js';
 import { readOmxLogRecords, omxRecordToRouterEvent } from '../adapters/omx-logs.js';
@@ -254,8 +254,16 @@ export function gjcSessionEvents(session = {}, log = {}) {
   return sorted(events);
 }
 
-async function readGjcSessionEvents(session = {}) {
+async function readGjcSessionEvents(session = {}, options = {}) {
   if (!session.sessionLogPath) return [];
+  if (options.pollGjcLogCursorMode === true) {
+    const log = await readGjcLogDelta(session.sessionLogPath, options.gjcLogCursor || {});
+    const events = gjcSessionEvents(session, log);
+    if (Array.isArray(options.gjcLogCursorUpdates) && log.cursor) {
+      options.gjcLogCursorUpdates.push({ cursor: log.cursor });
+    }
+    return events;
+  }
   const log = await readGjcLog(session.sessionLogPath);
   return gjcSessionEvents(session, log);
 }
@@ -403,7 +411,7 @@ export async function routeSessionEvents(session = {}, options = {}) {
   const events = [];
 
   if (session.backend === 'gjc' || session.gjcSessionId) {
-    return readGjcSessionEvents(session);
+    return readGjcSessionEvents(session, options);
   }
   const sessionEventId = session.hasOmxLifecycle !== false && session.omxSessionId
     ? session.omxSessionId

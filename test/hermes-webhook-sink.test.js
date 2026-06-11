@@ -14,7 +14,7 @@ import {
   splitNotificationMarkdown,
 } from '../src/hermes-webhook-sink.js';
 import { ensureHermesDiscordChannelAllowed } from '../src/hermes-config.js';
-import { closeEventIndex, markDeliveryFailed, markDeliverySent, openEventIndex, upsertEvents } from '../src/control-plane/event-index.js';
+import { closeEventIndex, getGjcLogCursor, markDeliveryFailed, markDeliverySent, openEventIndex, upsertEvents } from '../src/control-plane/event-index.js';
 import { channelForProject, channelNameForProject, resolveProjectChannel } from '../src/project-channels.js';
 import { listDiscordGuildChannels, resolveDiscordGuildId } from '../src/discord-channels.js';
 
@@ -872,6 +872,114 @@ test('shouldForwardToHermes filters noisy events and non-final assistant respons
 test('pollHermesWebhookNotifications is a no-op without Hermes webhook URL', async () => {
   const result = await pollHermesWebhookNotifications({ projectRoot: process.cwd(), webhookUrl: '' });
   assert.deepEqual(result, { ok: false, reason: 'missing-webhook-url', sent: 0 });
+});
+
+
+test('pollHermesWebhookNotifications advances GJC JSONL byte cursor only for lifecycle-safe polls', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'omx-bridge-hermes-gjc-cursor-'));
+  const sessionsRoot = join(root, 'gjc-sessions');
+  const logPath = join(sessionsRoot, 'session.jsonl');
+  const statePath = join(root, 'state.json');
+  const eventIndexPath = join(root, 'events.sqlite');
+  const sessionId = 'gjc-cursor-session';
+  await mkdir(sessionsRoot, { recursive: true });
+
+  const lines = [
+    { type: 'session', version: 3, id: sessionId, timestamp: '2026-06-04T10:00:00.000Z', cwd: root, title: 'GJC Cursor' },
+    { type: 'message', id: 'gjc-user-1', timestamp: '2026-06-04T10:00:01.000Z', message: { role: 'user', content: [{ type: 'text', text: '첫 요청' }] } },
+    { type: 'message', id: 'gjc-final-1', timestamp: '2026-06-04T10:00:02.000Z', message: { role: 'assistant', content: [{ type: 'text', text: '첫 답변' }] }, stopReason: 'stop' },
+  ];
+  const serializeGjcLog = () => lines.map((line) => JSON.stringify(line)).join('\n');
+  const writeGjcLog = async () => writeFile(logPath, serializeGjcLog());
+  await writeGjcLog();
+
+  const posts = [];
+  const fullLifecycleTypes = new Set(['SessionStart', 'CommandSubmitted', 'FinalAnswer', 'SessionIdle', 'SessionEnd']);
+  const pollOptions = {
+    projectRoot: root,
+    discoverTmuxProjectRoots: false,
+    listTmuxPanesFn: () => [{
+      paneDead: false,
+      gjcProfile: '1',
+      paneCurrentPath: root,
+      tmuxId: 'gjc-live',
+      tmuxPaneId: '%1',
+    }],
+    listTmuxSessionsFn: () => [],
+    statePath,
+    eventIndexPath,
+    webhookUrl: 'http://hermes.test/webhook',
+    eventTypes: fullLifecycleTypes,
+    bootSince: '2026-06-04T09:59:00.000Z',
+    requireChannel: false,
+    priorTerminalLifecycleDeliveryBlocks: false,
+    maxEventsPerPoll: 10,
+    fetchFn: async (_url, request) => {
+      posts.push(JSON.parse(request.body));
+      return { ok: true };
+    },
+  };
+
+  await withEnv({ GJC_SESSIONS_ROOT: sessionsRoot }, async () => {
+    const first = await pollHermesWebhookNotifications(pollOptions);
+    assert.equal(first.sent, 3);
+    assert.deepEqual(new Set(posts.map((post) => post.event_type)), new Set(['SessionStart', 'CommandSubmitted', 'FinalAnswer']));
+
+    const index = await openEventIndex(root, { eventIndexPath });
+    let firstCursor;
+    try {
+      firstCursor = getGjcLogCursor(index.db, logPath);
+      assert.equal(firstCursor.gjc_session_id, sessionId);
+      assert.equal(firstCursor.byte_offset, Buffer.byteLength(serializeGjcLog()));
+    } finally {
+      closeEventIndex(index);
+    }
+
+    lines.push(
+      { type: 'message', id: 'gjc-user-2', timestamp: '2026-06-04T10:00:03.000Z', message: { role: 'user', content: [{ type: 'text', text: '둘째 요청' }] } },
+      { type: 'message', id: 'gjc-final-2', timestamp: '2026-06-04T10:00:04.000Z', message: { role: 'assistant', content: [{ type: 'text', text: '둘째 답변' }] }, stopReason: 'stop' },
+    );
+    await writeGjcLog();
+    const second = await pollHermesWebhookNotifications(pollOptions);
+    assert.equal(second.sent, 2);
+    const secondPreviews = posts.slice(3).map((post) => post.text_preview);
+    assert.equal(secondPreviews.includes('둘째 요청'), true);
+    assert.equal(secondPreviews.includes('둘째 답변'), true);
+
+    const afterSecond = await openEventIndex(root, { eventIndexPath });
+    let safeCursor;
+    try {
+      safeCursor = getGjcLogCursor(afterSecond.db, logPath);
+      assert.equal(safeCursor.byte_offset, Buffer.byteLength(serializeGjcLog()));
+      assert.equal(safeCursor.byte_offset > firstCursor.byte_offset, true);
+    } finally {
+      closeEventIndex(afterSecond);
+    }
+
+    const inactiveEnd = await pollHermesWebhookNotifications({
+      ...pollOptions,
+      listTmuxPanesFn: () => [],
+      bootSince: '2026-06-04T09:59:00.000Z',
+    });
+    assert.equal(inactiveEnd.sent, 1);
+    assert.equal(posts.at(-1).event_type, 'SessionEnd');
+
+    lines.push({ type: 'message', id: 'gjc-user-3', timestamp: '2026-06-04T10:00:05.000Z', message: { role: 'user', content: [{ type: 'text', text: '셋째 요청' }] } });
+    await writeGjcLog();
+    const commandOnly = await pollHermesWebhookNotifications({
+      ...pollOptions,
+      eventTypes: new Set(['CommandSubmitted']),
+      bootSince: '2026-06-04T10:00:05.000Z',
+    });
+    assert.equal(commandOnly.sent, 1);
+
+    const afterCommandOnly = await openEventIndex(root, { eventIndexPath });
+    try {
+      assert.equal(getGjcLogCursor(afterCommandOnly.db, logPath).byte_offset, safeCursor.byte_offset);
+    } finally {
+      closeEventIndex(afterCommandOnly);
+    }
+  });
 });
 
 test('pollHermesWebhookNotifications ignores unmapped Codex fallback logs by default', async () => {
