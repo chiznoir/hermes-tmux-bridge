@@ -40,6 +40,7 @@ export function stripSyntheticNotificationContext(text) {
   const stripped = normalized
     .replace(/(?:^|\n)# AGENTS\.md instructions for [^\n]*(?:\n+<INSTRUCTIONS>[\s\S]*?<\/INSTRUCTIONS>)?(?:\s*<environment_context>[\s\S]*?<\/environment_context>)?/g, '\n')
     .replace(/(?:^|\n)\s*<environment_context>[\s\S]*?<\/environment_context>\s*/g, '\n')
+    .replace(/(?:^|\n)\s*<codex_internal_context\b[^>]*>[\s\S]*?<\/codex_internal_context>\s*/g, '\n')
     .replace(/(?:^|\n)\s*<hook_prompt\b[^>]*>[\s\S]*?<\/hook_prompt>\s*/g, '\n')
     .replace(/(?:^|\n)\s*<turn_aborted>[\s\S]*?<\/turn_aborted>\s*/g, '\n')
     .replace(/(?:^|\n)\s*<subagent_notification>[\s\S]*?<\/subagent_notification>\s*/g, '\n')

@@ -13,6 +13,19 @@ import {
   upsertEvents,
 } from '../src/control-plane/event-index.js';
 
+process.env.GJC_SESSIONS_ROOT ??= join(tmpdir(), 'hermes-tmux-bridge-empty-gjc-sessions-for-tests');
+
+function localDateTimeSuffix(value) {
+  const date = new Date(value);
+  const day = [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+    .map((part, index) => String(part).padStart(index === 0 ? 4 : 2, '0'))
+    .join('');
+  const time = [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map((part) => String(part).padStart(2, '0'))
+    .join('');
+  return `${day}-${time}`;
+}
+
 async function withEnv(env, fn) {
   const previous = new Map();
   for (const key of Object.keys(env)) previous.set(key, process.env[key]);
@@ -151,6 +164,217 @@ esac
   assert.equal(posts.length, 1);
   assert.match(posts[0].content, /# Session Idle/);
   assert.match(posts[0].content, /안녕 테스트 한줄 출력/);
+});
+
+
+test('pollDiscordNotifications sends inactive GJC lifecycle and command events to an auto-created session thread', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gjc-discord-inactive-project-'));
+  const sessionsRoot = join(root, 'gjc-sessions');
+  const statePath = join(root, 'state.json');
+  const mapPath = join(root, 'project-channels.json');
+  const sessionId = '019e9000-5555-7000-aaaa-ffffffffffff';
+  const startedAt = '2026-06-04T10:00:00.000Z';
+  const expectedThreadName = `gjc-${basename(root)}-gjc-${localDateTimeSuffix(startedAt)}`;
+  await mkdir(join(sessionsRoot, 'project'), { recursive: true });
+  await writeFile(join(sessionsRoot, 'project', `${sessionId}.jsonl`), [
+    { type: 'session', version: 3, id: sessionId, timestamp: startedAt, cwd: root, title: 'GJC inactive session' },
+    { type: 'message', id: 'gjc-user-1', timestamp: '2026-06-04T10:00:01.000Z', message: { role: 'user', content: [{ type: 'text', text: '안녕 테스트 한줄 출력' }] } },
+    { type: 'message', id: 'gjc-final-1', timestamp: '2026-06-04T10:00:02.000Z', message: { role: 'assistant', content: [{ type: 'text', text: '안녕 테스트 한줄 출력' }] }, stopReason: 'stop' },
+  ].map((line) => JSON.stringify(line)).join('\n'));
+  await writeFile(mapPath, JSON.stringify({ projects: { [basename(root)]: 'project-channel' } }));
+  const tmuxBin = join(root, 'fake-empty-tmux.sh');
+  await writeFile(tmuxBin, '#!/bin/sh\nexit 0\n');
+  await chmod(tmuxBin, 0o755);
+
+  const requests = [];
+  const result = await withEnv({ GJC_SESSIONS_ROOT: sessionsRoot, TMUX_BIN: tmuxBin }, async () => pollDiscordNotifications({
+    projectRoot: root,
+    discoverTmuxProjectRoots: false,
+    statePath,
+    webhookUrl: '',
+    discordBotToken: 'test-token',
+    discordGuildId: 'guild-1',
+    projectChannelMapPath: mapPath,
+    eventTypes: new Set(['SessionStart', 'CommandSubmitted', 'SessionEnd']),
+    replay: true,
+    maxEventsPerPoll: 10,
+    autoCreateDiscordThreads: true,
+    discordFetchFn: async (url, request = {}) => {
+      const method = request.method || 'GET';
+      const body = request.body ? JSON.parse(request.body) : null;
+      requests.push({ url, method, body });
+      if (method === 'GET' && url.endsWith('/guilds/guild-1/threads/active')) {
+        return { ok: true, json: async () => ({ threads: [] }), text: async () => '' };
+      }
+      if (method === 'POST' && url.endsWith('/channels/project-channel/threads')) {
+        assert.equal(body.name, expectedThreadName);
+        return { ok: true, status: 201, json: async () => ({ id: 'gjc-session-thread', name: body.name, parent_id: 'project-channel', type: 11 }), text: async () => '' };
+      }
+      if (method === 'POST' && url.endsWith('/channels/gjc-session-thread/messages')) {
+        return { ok: true, json: async () => ({ id: `message-${requests.length}` }), text: async () => '' };
+      }
+      throw new Error(`unexpected Discord request: ${method} ${url}`);
+    },
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.sent, 3);
+  assert.equal(requests.filter((request) => request.url.endsWith('/channels/project-channel/threads')).length, 1);
+  const posts = requests.filter((request) => request.url.endsWith('/channels/gjc-session-thread/messages'));
+  assert.deepEqual(posts.map((post) => post.body.content.match(/^# ([^\n]+)/)?.[1]), ['Session Start', 'User Command', 'Session Ended']);
+  assert.match(posts[1].body.content, /안녕 테스트 한줄 출력/);
+
+  const saved = JSON.parse(await readFile(mapPath, 'utf8'));
+  const [entry] = Object.values(saved.sessionThreads);
+  assert.equal(entry.threadId, 'gjc-session-thread');
+  assert.equal(entry.threadName, expectedThreadName);
+});
+
+test('pollDiscordNotifications creates a GJC session thread for a leading FinalAnswer', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gjc-discord-leading-final-'));
+  const statePath = join(root, 'state.json');
+  const eventIndexPath = join(root, 'events.sqlite');
+  const mapPath = join(root, 'project-channels.json');
+  const sessionId = '019e9000-5656-7000-aaaa-ffffffffffff';
+  const startedAt = '2026-06-04T10:00:00.000Z';
+  const expectedThreadName = `gjc-${basename(root)}-gjc-${localDateTimeSuffix(startedAt)}`;
+  await writeFile(mapPath, JSON.stringify({ projects: { [basename(root)]: 'project-channel' } }));
+  const index = await openEventIndex(root, { eventIndexPath });
+  try {
+    upsertEvents(index.db, [{
+      session: {
+        backend: 'gjc',
+        lifecycleOwner: 'gjc',
+        hasOmxLifecycle: false,
+        gjcSessionId: sessionId,
+        bridgeSessionId: sessionId,
+        threadId: sessionId,
+        project: basename(root),
+        startedAt,
+      },
+      event: {
+        eventId: `${sessionId}:final`,
+        type: 'FinalAnswer',
+        source: 'gjc-log',
+        timestamp: '2026-06-04T10:00:02.000Z',
+        text: 'GJC 완료 답변',
+        phase: 'final_answer',
+      },
+    }]);
+  } finally {
+    closeEventIndex(index);
+  }
+
+  const requests = [];
+  const result = await pollDiscordNotifications({
+    projectRoot: root,
+    discoverTmuxProjectRoots: false,
+    statePath,
+    eventIndexPath,
+    webhookUrl: '',
+    discordBotToken: 'test-token',
+    discordGuildId: 'guild-1',
+    projectChannelMapPath: mapPath,
+    eventTypes: new Set(['FinalAnswer']),
+    allowDiscordFinalAnswerNotifications: true,
+    replay: true,
+    autoCreateDiscordThreads: true,
+    discordFetchFn: async (url, request = {}) => {
+      const method = request.method || 'GET';
+      const body = request.body ? JSON.parse(request.body) : null;
+      requests.push({ url, method, body });
+      if (method === 'GET' && url.endsWith('/guilds/guild-1/threads/active')) {
+        return { ok: true, json: async () => ({ threads: [] }), text: async () => '' };
+      }
+      if (method === 'POST' && url.endsWith('/channels/project-channel/threads')) {
+        assert.equal(body.name, expectedThreadName);
+        return { ok: true, status: 201, json: async () => ({ id: 'gjc-final-thread', name: body.name, parent_id: 'project-channel', type: 11 }), text: async () => '' };
+      }
+      if (method === 'POST' && url.endsWith('/channels/gjc-final-thread/messages')) {
+        return { ok: true, json: async () => ({ id: 'message-1' }), text: async () => '' };
+      }
+      throw new Error(`unexpected Discord request: ${method} ${url}`);
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.sent, 1);
+  assert.equal(result.failed, 0);
+  assert.equal(requests.filter((request) => request.url.endsWith('/channels/project-channel/threads')).length, 1);
+  const posts = requests.filter((request) => request.url.endsWith('/channels/gjc-final-thread/messages'));
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].body.content, /# Session Idle/);
+  assert.match(posts[0].body.content, /GJC 완료 답변/);
+  assert.doesNotMatch(posts[0].body.content, /Bridge Notification Delivery Failed/);
+});
+
+test('pollDiscordNotifications skips auxiliary nested GJC agent logs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gjc-discord-aux-project-'));
+  const sessionsRoot = join(root, 'gjc-sessions');
+  const statePath = join(root, 'state.json');
+  const eventIndexPath = join(root, 'events.sqlite');
+  const parentId = '019e9000-5656-7000-aaaa-ffffffffffff';
+  const childId = '019e9000-5757-7000-bbbb-ffffffffffff';
+  const parentStem = `2026-06-04T10-00-00-000Z_${parentId}`;
+  const projectDir = join(sessionsRoot, 'project');
+  await mkdir(join(projectDir, parentStem), { recursive: true });
+  await writeFile(join(projectDir, `${parentStem}.jsonl`), [
+    { type: 'session', version: 3, id: parentId, timestamp: '2026-06-04T10:00:00.000Z', cwd: root, title: 'GJC parent session' },
+  ].map((line) => JSON.stringify(line)).join('\n'));
+  const childPath = join(projectDir, parentStem, '20-ArchitectG005Final.jsonl');
+  await writeFile(childPath, [
+    { type: 'session', version: 3, id: childId, timestamp: '2026-06-04T10:00:01.000Z', cwd: root, title: 'GJC child session' },
+    { type: 'message', id: 'gjc-child-user-1', timestamp: '2026-06-04T10:00:02.000Z', message: { role: 'user', content: [{ type: 'text', text: 'Complete the assignment below, thoroughly' }] } },
+    { type: 'message', id: 'gjc-child-final-1', timestamp: '2026-06-04T10:00:03.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'APPROVE' }] }, stopReason: 'stop' },
+  ].map((line) => JSON.stringify(line)).join('\n'));
+  const tmuxBin = join(root, 'fake-empty-tmux.sh');
+  await writeFile(tmuxBin, '#!/bin/sh\nexit 0\n');
+  await chmod(tmuxBin, 0o755);
+  const index = await openEventIndex(root, { eventIndexPath });
+  try {
+    upsertEvents(index.db, [{
+      session: {
+        backend: 'gjc',
+        lifecycleOwner: 'gjc',
+        gjcSessionId: childId,
+        bridgeSessionId: childId,
+        threadId: childId,
+        sessionLogPath: childPath,
+        project: basename(root),
+        hasOmxLifecycle: false,
+      },
+      event: {
+        eventId: `${childId}:stale-command`,
+        type: 'CommandSubmitted',
+        source: 'gjc-log',
+        timestamp: '2026-06-04T10:00:02.000Z',
+        text: 'stale child command',
+      },
+    }]);
+  } finally {
+    closeEventIndex(index);
+  }
+
+  const posts = [];
+  const result = await withEnv({ GJC_SESSIONS_ROOT: sessionsRoot, TMUX_BIN: tmuxBin }, async () => pollDiscordNotifications({
+    projectRoot: root,
+    discoverTmuxProjectRoots: false,
+    statePath,
+    eventIndexPath,
+    webhookUrl: 'https://discord.test/webhook',
+    eventTypes: new Set(['CommandSubmitted', 'FinalAnswer']),
+    allowDiscordFinalAnswerNotifications: true,
+    replay: true,
+    maxEventsPerPoll: 10,
+    fetchFn: async (_url, request = {}) => {
+      posts.push(JSON.parse(request.body));
+      return { ok: true };
+    },
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.sent, 0);
+  assert.equal(posts.length, 0);
 });
 
 test('pollDiscordNotifications ignores FinalAnswer and SessionIdle by default even when env-like event types include them', async () => {

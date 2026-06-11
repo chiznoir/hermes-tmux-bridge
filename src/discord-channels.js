@@ -48,9 +48,43 @@ function targetChannelName(nameOrProject) {
   return channelNameForProject(nameOrProject);
 }
 
+function slugThreadSegment(value, fallback = 'session') {
+  return (String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || fallback);
+}
+
+function threadDateTimeSuffix(value) {
+  const date = new Date(value || '');
+  if (Number.isNaN(date.getTime())) return null;
+  const day = [
+    date.getFullYear(),
+    date.getMonth() + 1,
+    date.getDate(),
+  ].map((part, index) => String(part).padStart(index === 0 ? 4 : 2, '0')).join('');
+  const time = [
+    date.getHours(),
+    date.getMinutes(),
+    date.getSeconds(),
+  ].map((part) => String(part).padStart(2, '0')).join('');
+  return `${day}-${time}`;
+}
+
+function defaultGjcThreadName(session = {}) {
+  const project = slugThreadSegment(session.project || session.gjcProject || session.cwd, 'gjc');
+  const branch = slugThreadSegment(session.gjcBranch || session.branchName || session.branch || 'gjc', 'gjc');
+  const suffix = threadDateTimeSuffix(session.gjcStartedAt || session.startedAt || session.lastEventAt);
+  return suffix ? `gjc-${project}-${branch}-${suffix}` : `gjc-${project}-${branch}`;
+}
+
 export function discordThreadNameForSession(session = {}, options = {}) {
   const configured = cleanEnv(options.discordThreadName || session.discordThreadName);
   if (configured) return configured.slice(0, 100);
+  if ((session.backend === 'gjc' || session.lifecycleOwner === 'gjc' || session.gjcSessionId) && !cleanEnv(session.tmuxId)) {
+    return defaultGjcThreadName(session).slice(0, 100);
+  }
   const id = cleanEnv(
     session.tmuxId
     || session.omxSessionId

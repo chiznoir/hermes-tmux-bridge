@@ -292,8 +292,10 @@ test('GET /sessions/:id routes gjc state, events, and latest idle text from gjc 
 
     const events = await request(server, `/sessions/${sessionId}/events`);
     assert.equal(events.status, 200);
-    assert.deepEqual(events.json.events.map((event) => event.type), ['CommandSubmitted', 'FinalAnswer', 'SessionIdle']);
-    assert.equal(events.json.events[1].source, 'gjc-log');
+    assert.deepEqual(events.json.events.map((event) => event.type), ['SessionStart', 'CommandSubmitted', 'FinalAnswer', 'SessionIdle', 'SessionEnd']);
+    assert.equal(events.json.events[0].source, 'notification');
+    assert.equal(events.json.events[2].source, 'gjc-log');
+    assert.equal(events.json.events[4].source, 'notification');
 
     const idle = await request(server, `/sessions/${sessionId}/idle/latest`);
     assert.equal(idle.status, 200);

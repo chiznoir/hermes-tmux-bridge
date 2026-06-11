@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { getSessionById, inferSessionKind, listSessions } from '../src/control-plane/registry.js';
 import { decideBackend, normalizeCommandMode } from '../src/control-plane/policy.js';
 import { appendAudit, auditEventToRouterEvent, readAuditLog } from '../src/control-plane/audit-log.js';
@@ -11,6 +11,7 @@ import { routeSessionEvents } from '../src/control-plane/event-router.js';
 import { buildSessionIndex } from '../src/omx.js';
 import { buildSessionIndex as buildGjcSessionIndex } from '../src/gjc.js';
 import { listGjcSessionLogPaths, readGjcLog } from '../src/gjc-log.js';
+import { stripSyntheticNotificationContext } from '../src/synthetic-context.js';
 
 async function withEnv(env, fn) {
   const previous = new Map();
@@ -92,6 +93,31 @@ test('gjc log reader parses version 3 session headers and assistant lifecycle me
   assert.equal(log.messages.at(-1)?.text, '최종 답변입니다.');
 });
 
+
+test('gjc log reader ignores thinking signatures when collecting assistant text', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gjc-thinking-log-'));
+  const sessionId = '019e9000-2121-7000-bbbb-cccccccccccc';
+  const logPath = await writeGjcSession(root, sessionId, [
+    { type: 'session', version: 3, id: sessionId, timestamp: '2026-06-04T10:00:00.000Z', cwd: root, title: 'GJC Thinking Session' },
+    {
+      type: 'message',
+      id: `${sessionId}-final`,
+      timestamp: '2026-06-04T10:00:10.000Z',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '', thinkingSignature: '{"encrypted_content":"secret"}' },
+          { type: 'text', text: '최종 답변입니다.', textSignature: '{"phase":"final_answer"}' },
+        ],
+      },
+      stopReason: 'stop',
+    },
+  ]);
+
+  const log = await readGjcLog(logPath);
+  assert.equal(log.messages.at(-1)?.text, '최종 답변입니다.');
+});
+
 test('gjc session discovery reads configured XDG session roots', async () => {
   const homeRoot = await mkdtemp(join(tmpdir(), 'gjc-home-'));
   const xdgRoot = await mkdtemp(join(tmpdir(), 'gjc-xdg-'));
@@ -116,6 +142,114 @@ test('gjc session discovery reads configured XDG session roots', async () => {
   });
 });
 
+test('gjc session discovery marks nested agent logs as auxiliary', async () => {
+  const homeRoot = await mkdtemp(join(tmpdir(), 'gjc-aux-home-'));
+  const xdgRoot = await mkdtemp(join(tmpdir(), 'gjc-aux-xdg-'));
+  const projectRoot = await mkdtemp(join(tmpdir(), 'gjc-aux-project-'));
+  const parentId = '019e9000-2424-7000-aaaa-bbbbbbbbbbbb';
+  const childId = '019e9000-2525-7000-cccc-dddddddddddd';
+  const parentStem = `2026-06-04T10-00-00-000Z_${parentId}`;
+  const root = join(xdgRoot, 'gjc', 'sessions');
+
+  await writeGjcSession(root, parentId, gjcSessionLines({
+    sessionId: parentId,
+    cwd: projectRoot,
+    startedAt: '2026-06-04T10:00:00.000Z',
+  }), { relativePath: `${basename(projectRoot)}/${parentStem}.jsonl` });
+  await writeGjcSession(root, childId, gjcSessionLines({
+    sessionId: childId,
+    cwd: projectRoot,
+    startedAt: '2026-06-04T10:00:01.000Z',
+    userText: '하위 에이전트 작업',
+  }), { relativePath: `${basename(projectRoot)}/${parentStem}/20-ArchitectG005Final.jsonl` });
+
+  await withEnv({ HOME: homeRoot, XDG_DATA_HOME: xdgRoot, GJC_SESSIONS_ROOT: undefined }, async () => {
+    const sessions = await buildGjcSessionIndex({
+      sessionScanLimit: 10,
+      listTmuxPanesFn: () => [],
+      listTmuxSessionsFn: () => [],
+    });
+    const parent = sessions.find((candidate) => candidate.gjcSessionId === parentId);
+    const child = sessions.find((candidate) => candidate.gjcSessionId === childId);
+
+    assert.equal(parent?.isAuxiliaryGjcLog, false);
+    assert.equal(parent?.kind, 'codex-thread');
+    assert.equal(child?.isAuxiliaryGjcLog, true);
+    assert.equal(child?.kind, 'gjc-subagent');
+  });
+});
+
+test('stripSyntheticNotificationContext removes Codex goal internal context', () => {
+  const goalContext = '<codex_internal_context source="goal">\ninternal plan\n</codex_internal_context>';
+
+  assert.equal(stripSyntheticNotificationContext(goalContext), '');
+  assert.equal(stripSyntheticNotificationContext(`${goalContext}\n실제 요청`), '실제 요청');
+});
+
+
+test('routeSessionEvents does not infer GJC SessionEnd while a unique live GJC pane matches cwd', async () => {
+  const homeRoot = await mkdtemp(join(tmpdir(), 'gjc-live-home-'));
+  const xdgRoot = await mkdtemp(join(tmpdir(), 'gjc-live-xdg-'));
+  const projectRoot = await mkdtemp(join(tmpdir(), 'gjc-live-project-'));
+  const sessionId = '019e9000-3131-7000-eeee-ffffffffffff';
+
+  await writeGjcSession(join(xdgRoot, 'gjc', 'sessions'), sessionId, gjcSessionLines({
+    sessionId,
+    cwd: projectRoot,
+    startedAt: '2026-06-04T10:00:00.000Z',
+    userText: 'pwd 한줄',
+    assistantText: projectRoot,
+  }), { relativePath: `${projectRoot.split('/').pop()}/${sessionId}.jsonl` });
+
+  await withEnv({ HOME: homeRoot, XDG_DATA_HOME: xdgRoot, GJC_SESSIONS_ROOT: undefined }, async () => {
+    const sessions = await buildGjcSessionIndex({
+      sessionScanLimit: 10,
+      listTmuxPanesFn: () => [{
+        managed: false,
+        paneDead: false,
+        tmuxId: 'gjc-live',
+        tmuxPaneId: '%31',
+        paneCurrentPath: projectRoot,
+        gjcProfile: '1',
+        gjcBranch: 'main',
+        gjcProject: projectRoot,
+        gjcSessionId: '',
+      }],
+      listTmuxSessionsFn: () => [],
+    });
+    const session = sessions.find((candidate) => candidate.gjcSessionId === sessionId);
+
+    assert.equal(session.status, 'active');
+    assert.equal(session.gjcActiveByCwd, true);
+    const events = await routeSessionEvents(session, { projectRoot });
+
+    assert.deepEqual(events.map((event) => event.type), ['SessionStart', 'CommandSubmitted', 'FinalAnswer', 'SessionIdle']);
+  });
+});
+
+test('routeSessionEvents suppresses GJC goal internal context user prompts', async () => {
+  const homeRoot = await mkdtemp(join(tmpdir(), 'gjc-goal-home-'));
+  const xdgRoot = await mkdtemp(join(tmpdir(), 'gjc-goal-xdg-'));
+  const projectRoot = await mkdtemp(join(tmpdir(), 'gjc-goal-project-'));
+  const sessionId = '019e9000-3232-7000-eeee-ffffffffffff';
+  const goalContext = '<codex_internal_context source="goal">\ninternal plan\n</codex_internal_context>';
+
+  await writeGjcSession(join(xdgRoot, 'gjc', 'sessions'), sessionId, [
+    { type: 'session', version: 3, id: sessionId, timestamp: '2026-06-04T10:00:00.000Z', cwd: projectRoot, title: 'GJC goal session' },
+    { type: 'message', id: `${sessionId}-goal`, timestamp: '2026-06-04T10:00:05.000Z', message: { role: 'user', content: [{ type: 'text', text: goalContext }] } },
+    { type: 'message', id: `${sessionId}-final`, timestamp: '2026-06-04T10:00:10.000Z', message: { role: 'assistant', content: [{ type: 'text', text: '완료' }] }, stopReason: 'stop' },
+  ], { relativePath: `${basename(projectRoot)}/${sessionId}.jsonl` });
+
+  await withEnv({ HOME: homeRoot, XDG_DATA_HOME: xdgRoot, GJC_SESSIONS_ROOT: undefined }, async () => {
+    const sessions = await listSessions({ projectRoot, sessionScanLimit: 10 });
+    const session = sessions.find((candidate) => candidate.gjcSessionId === sessionId);
+    const events = await routeSessionEvents(session, { projectRoot });
+
+    assert.equal(events.some((event) => event.type === 'CommandSubmitted'), false);
+    assert.deepEqual(events.map((event) => event.type), ['SessionStart', 'FinalAnswer', 'SessionIdle', 'SessionEnd']);
+  });
+});
+
 test('routeSessionEvents converts GJC JSONL messages into notification events', async () => {
   const homeRoot = await mkdtemp(join(tmpdir(), 'gjc-events-home-'));
   const xdgRoot = await mkdtemp(join(tmpdir(), 'gjc-events-xdg-'));
@@ -136,10 +270,13 @@ test('routeSessionEvents converts GJC JSONL messages into notification events', 
 
     const events = await routeSessionEvents(session, { projectRoot });
 
-    assert.deepEqual(events.map((event) => event.type), ['CommandSubmitted', 'FinalAnswer', 'SessionIdle']);
-    assert.equal(events[0].source, 'gjc-log');
-    assert.equal(events[1].text, '안녕 테스트 한줄 출력');
-    assert.equal(events[1].phase, 'final_answer');
+    assert.deepEqual(events.map((event) => event.type), ['SessionStart', 'CommandSubmitted', 'FinalAnswer', 'SessionIdle', 'SessionEnd']);
+    assert.equal(events[0].source, 'notification');
+    assert.equal(events[1].source, 'gjc-log');
+    assert.equal(events[2].text, '안녕 테스트 한줄 출력');
+    assert.equal(events[2].phase, 'final_answer');
+    assert.equal(events[4].source, 'notification');
+    assert.equal(events[4].reason, 'gjc_final_answer');
   });
 });
 

@@ -62,12 +62,15 @@ function collectText(content, fragments = []) {
     return fragments;
   }
   if (!content || typeof content !== 'object') return fragments;
-  if (content.type === 'text' && typeof content.text === 'string' && content.text.trim()) {
+  if ((content.type === 'text' || content.type === 'output_text' || content.type === 'input_text')
+    && typeof content.text === 'string'
+    && content.text.trim()) {
     fragments.push(content.text);
     return fragments;
   }
+  if (typeof content.type === 'string') return fragments;
   for (const [key, child] of Object.entries(content)) {
-    if (key === 'type') continue;
+    if (key === 'type' || key.endsWith('Signature') || key === 'encrypted_content') continue;
     collectText(child, fragments);
   }
   return fragments;

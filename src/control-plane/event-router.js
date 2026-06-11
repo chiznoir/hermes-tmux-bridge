@@ -158,17 +158,72 @@ function matchingFinalAnswerMessage(event, messages = []) {
     || null;
 }
 
+function gjcLifecycleSessionId(session = {}, log = {}) {
+  return session.bridgeSessionId
+    || session.gjcSessionId
+    || log.gjcSessionId
+    || session.codexSessionId
+    || session.threadId
+    || 'unknown-gjc-session';
+}
+
+function isActiveGjcSession(session = {}) {
+  return session.status === 'active' || Boolean(session.tmuxId || session.tmuxPaneId || session.gjcProfile === '1');
+}
+
+function latestGjcFinalAnswer(log = {}) {
+  return [...(log.messages || [])].reverse()
+    .find((message) => message.role === 'assistant' && message.phase === 'final_answer' && message.text) || null;
+}
+
+function gjcSessionStartEvent(session = {}, log = {}) {
+  const sessionId = gjcLifecycleSessionId(session, log);
+  const timestamp = session.startedAt || log.startedAt;
+  if (!timestamp || !hasValidTimestamp(timestamp)) return null;
+  const project = session.project || log.cwd || session.cwd || 'unknown';
+  return {
+    eventId: `${sessionId}:start`,
+    type: 'SessionStart',
+    timestamp,
+    source: 'notification',
+    text: `새 GJC 세션을 시작했어.\nSession: ${sessionId}\nProject: ${project}\ntmux: ${session.tmuxId || ''}`.trim(),
+    backend: 'gjc-jsonl',
+  };
+}
+
+function gjcSessionEndEvent(session = {}, log = {}) {
+  if (isActiveGjcSession(session)) return null;
+  const finalAnswer = latestGjcFinalAnswer(log);
+  if (!finalAnswer?.timestamp || !hasValidTimestamp(finalAnswer.timestamp)) return null;
+  const sessionId = gjcLifecycleSessionId(session, log);
+  const project = session.project || log.cwd || session.cwd || 'unknown';
+  return {
+    eventId: `${sessionId}:end`,
+    type: 'SessionEnd',
+    timestamp: finalAnswer.timestamp,
+    source: 'notification',
+    text: `GJC 세션이 종료됐어.\nSession: ${sessionId}\nProject: ${project}\ntmux: ${session.tmuxId || ''}`.trim(),
+    backend: 'gjc-jsonl',
+    durationMs: durationMs(session.startedAt || log.startedAt, finalAnswer.timestamp),
+    reason: 'gjc_final_answer',
+  };
+}
+
 export function gjcSessionEvents(session = {}, log = {}) {
-  const sessionId = session.bridgeSessionId || session.gjcSessionId || session.codexSessionId || session.threadId || 'unknown-gjc-session';
+  const sessionId = gjcLifecycleSessionId(session, log);
   const events = [];
+  const startEvent = gjcSessionStartEvent(session, log);
+  if (startEvent) events.push(startEvent);
   for (const message of log.messages || []) {
     if (message.role === 'user' && message.text) {
+      const text = userCommandText(message.text);
+      if (!text) continue;
       events.push({
         eventId: `${sessionId}:${message.id}`,
         type: 'CommandSubmitted',
         source: 'gjc-log',
         timestamp: message.timestamp,
-        text: userCommandText(message.text),
+        text,
         backend: 'gjc-jsonl',
       });
       continue;
@@ -194,6 +249,8 @@ export function gjcSessionEvents(session = {}, log = {}) {
       });
     }
   }
+  const endEvent = gjcSessionEndEvent(session, log);
+  if (endEvent) events.push(endEvent);
   return sorted(events);
 }
 

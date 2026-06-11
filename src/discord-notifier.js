@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isAuxiliaryCodexSession } from './codex-log.js';
+import { isAuxiliaryGjcSession } from './gjc.js';
 import { listSessions } from './control-plane/registry.js';
 import { routeSessionEvents } from './control-plane/event-router.js';
 import {
@@ -222,9 +223,10 @@ function allowedMentionsForEvent(event = {}, options = {}) {
 function shouldPollSession(session = {}, options = {}) {
   if (session.kind === 'omx-team' && suppressTeamWorkerNotifications(options)) return false;
   if (session.isAuxiliaryCodexLog === true && session.hasOmxLifecycle !== true) return false;
+  if (isAuxiliaryGjcSession(session)) return false;
   if (isNativeOnlyLifecyclePollution(session)) return false;
   if (session.backend === 'gjc' || session.lifecycleOwner === 'gjc' || session.gjcSessionId) {
-    return session.status === 'active' || Boolean(session.tmuxId || session.tmuxPaneId || session.gjcProfile === '1');
+    return true;
   }
   if (session.hasOmxLifecycle === false && options.allowCodexOnlySessionMonitoring !== true) return false;
   if (options.allowUnmappedCodexLogNotifications === true || includeUnmappedCodexLogs(options)) return true;

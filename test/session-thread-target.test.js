@@ -32,3 +32,26 @@ test('shouldCreateMissingSessionThread allows explicit or human session thread n
     },
   }), true);
 });
+
+test('shouldCreateMissingSessionThread allows managed GJC sessions despite raw GJC ids', () => {
+  assert.equal(shouldCreateMissingSessionThread({ type: 'SessionStart' }, {
+    session: {
+      backend: 'gjc',
+      lifecycleOwner: 'gjc',
+      hasOmxLifecycle: false,
+      gjcSessionId: '019e9000-5555-7000-aaaa-ffffffffffff',
+      bridgeSessionId: '019e9000-5555-7000-aaaa-ffffffffffff',
+      project: 'hermes-tmux-bridge',
+    },
+  }), true);
+  assert.equal(shouldCreateMissingSessionThread({ type: 'FinalAnswer' }, {
+    session: {
+      backend: 'gjc',
+      lifecycleOwner: 'gjc',
+      hasOmxLifecycle: false,
+      gjcSessionId: '019e9000-5555-7000-aaaa-ffffffffffff',
+      bridgeSessionId: '019e9000-5555-7000-aaaa-ffffffffffff',
+      project: 'hermes-tmux-bridge',
+    },
+  }), true);
+});

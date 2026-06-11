@@ -13,6 +13,7 @@ function hasHumanSessionThreadName(session = {}) {
 function shouldCreateThreadForSession(session = null, options = {}) {
   if (!session || Object.keys(session).length === 0) return true;
   if (session.isAuxiliaryCodexLog === true) return false;
+  if (session.backend === 'gjc' || session.lifecycleOwner === 'gjc' || session.gjcSessionId) return true;
   if (session.hasOmxLifecycle === false) return options.createMissingDiscordThreadForCodexOnly === true;
   if (hasExplicitThreadName(session, options)) return true;
   const omxSessionId = session.omxSessionId || session.session_id;
@@ -28,11 +29,16 @@ function shouldCreateThreadForSession(session = null, options = {}) {
   return true;
 }
 
+function isGjcSession(session = {}) {
+  return session.backend === 'gjc' || session.lifecycleOwner === 'gjc' || Boolean(session.gjcSessionId);
+}
+
 export function shouldCreateMissingSessionThread(event = {}, options = {}) {
   if (options.createMissingDiscordThreadForAllEvents === true) return true;
   if (!shouldCreateThreadForSession(options.session, options)) return false;
   if (event.type === 'SessionEnd') return options.createMissingDiscordThreadForSessionEnd === true;
   if (event.type === 'FinalAnswer' || event.type === 'AgentResponse' || event.type === 'SessionIdle') {
+    if (isGjcSession(options.session)) return true;
     return options.createMissingDiscordThreadForFinalAnswer === true
       || options.createMissingDiscordThreadForTerminalOutput === true;
   }

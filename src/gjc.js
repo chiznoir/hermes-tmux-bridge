@@ -1,4 +1,5 @@
-import { basename } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { listGjcSessionLogPaths, readGjcLog } from './gjc-log.js';
 import { listTmuxPanes, listTmuxSessions } from './tmux.js';
 
@@ -30,10 +31,36 @@ function slugify(value) {
     .replace(/^-|-$/g, '') || 'project');
 }
 
-function managedTmuxMatch(gjcSessionId, panes = [], sessions = []) {
-  return panes.find((pane) => pane.managed && pane.paneDead !== true && pane.gjcSessionId === gjcSessionId)
+function managedTmuxMatch(gjcSessionId, panes = [], sessions = [], log = {}) {
+  const exact = panes.find((pane) => pane.managed && pane.paneDead !== true && pane.gjcSessionId === gjcSessionId)
     || sessions.find((session) => session.managed && session.gjcSessionId === gjcSessionId)
     || null;
+  if (exact) return exact;
+
+  const cwd = asString(log.cwd);
+  if (!cwd) return null;
+  const cwdMatches = panes.filter((pane) => pane.paneDead !== true
+    && pane.gjcProfile === '1'
+    && pane.paneCurrentPath === cwd);
+  if (cwdMatches.length !== 1) return null;
+  return {
+    ...cwdMatches[0],
+    managed: false,
+    gjcActiveByCwd: true,
+  };
+}
+
+function isAuxiliaryGjcLogPath(filePath) {
+  const parentDir = dirname(filePath || '');
+  const parentName = basename(parentDir);
+  if (!parentName || parentName === '.' || parentName === '/') return false;
+  return existsSync(join(dirname(parentDir), `${parentName}.jsonl`));
+}
+
+export function isAuxiliaryGjcSession(session = {}) {
+  if (session.isAuxiliaryGjcLog === true) return true;
+  if (!session.sessionLogPath) return false;
+  return isAuxiliaryGjcLogPath(session.sessionLogPath);
 }
 
 function sessionScanLimit(options = {}) {
@@ -76,7 +103,8 @@ export async function buildSessionIndex(options = {}) {
     if (!gjcSessionId) continue;
     const cwd = asString(log.cwd);
     const project = projectNameFromCwd(log.cwd);
-    const tmuxMatch = managedTmuxMatch(gjcSessionId, tmuxPanes, tmuxSessions);
+    const tmuxMatch = managedTmuxMatch(gjcSessionId, tmuxPanes, tmuxSessions, log);
+    const isAuxiliaryGjcLog = isAuxiliaryGjcSession({ sessionLogPath: file });
     sessions.push({
       backend: 'gjc',
       gjcSessionId,
@@ -100,10 +128,12 @@ export async function buildSessionIndex(options = {}) {
       gjcOwnerKey: tmuxMatch?.gjcOwnerKey || null,
       gjcStartedAt: tmuxMatch?.gjcStartedAt || null,
       gjcSessionTag: tmuxMatch?.gjcSessionId || null,
+      gjcActiveByCwd: tmuxMatch?.gjcActiveByCwd === true,
       sessionLogPath: file,
       hasOmxLifecycle: false,
       lifecycleOwner: 'gjc',
-      kind: 'codex-thread',
+      isAuxiliaryGjcLog,
+      kind: isAuxiliaryGjcLog ? 'gjc-subagent' : 'codex-thread',
       sources: [{ source: 'gjc-log', path: file }],
     });
   }
