@@ -269,49 +269,7 @@ async function publicSessionWithActivity(session) {
   };
 }
 
-function gjcSessionEvents(session = {}, log = {}) {
-  const events = [];
-  for (const message of log.messages || []) {
-    if (message.role === 'user' && message.text) {
-      events.push({
-        eventId: `${session.bridgeSessionId || session.gjcSessionId}:${message.id}`,
-        type: 'CommandSubmitted',
-        source: 'gjc-log',
-        timestamp: message.timestamp,
-        text: message.text,
-        backend: 'gjc-jsonl',
-      });
-      continue;
-    }
-    if (message.role === 'assistant' && message.phase === 'final_answer' && message.text) {
-      events.push({
-        eventId: `${session.bridgeSessionId || session.gjcSessionId}:${message.id}`,
-        type: 'FinalAnswer',
-        source: 'gjc-log',
-        timestamp: message.timestamp,
-        text: message.text,
-        backend: 'gjc-jsonl',
-        phase: 'final_answer',
-      });
-      events.push({
-        eventId: `${session.bridgeSessionId || session.gjcSessionId}:${message.id}:idle`,
-        type: 'SessionIdle',
-        source: 'gjc-log',
-        timestamp: message.timestamp,
-        text: '작업 완료. 다음 지시를 기다리는 상태입니다.',
-        backend: 'gjc-jsonl',
-        phase: 'idle',
-      });
-    }
-  }
-  return events.sort((left, right) => Date.parse(left.timestamp || 0) - Date.parse(right.timestamp || 0));
-}
-
 async function sessionEvents(session, options = {}) {
-  if (session.backend === 'gjc' || session.gjcSessionId) {
-    const log = await readSessionLog(session);
-    return gjcSessionEvents(session, log);
-  }
   return routeSessionEvents(session, options);
 }
 

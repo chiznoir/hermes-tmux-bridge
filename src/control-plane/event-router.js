@@ -1,4 +1,5 @@
 import { findCodexLogBySessionId, isAuxiliaryCodexLog, readCodexLog } from '../codex-log.js';
+import { readGjcLog } from '../gjc-log.js';
 import { readBridgeCommands } from '../interactions.js';
 import { readAuditLog, auditEventToRouterEvent } from './audit-log.js';
 import { readOmxLogRecords, omxRecordToRouterEvent } from '../adapters/omx-logs.js';
@@ -157,6 +158,51 @@ function matchingFinalAnswerMessage(event, messages = []) {
     || null;
 }
 
+export function gjcSessionEvents(session = {}, log = {}) {
+  const sessionId = session.bridgeSessionId || session.gjcSessionId || session.codexSessionId || session.threadId || 'unknown-gjc-session';
+  const events = [];
+  for (const message of log.messages || []) {
+    if (message.role === 'user' && message.text) {
+      events.push({
+        eventId: `${sessionId}:${message.id}`,
+        type: 'CommandSubmitted',
+        source: 'gjc-log',
+        timestamp: message.timestamp,
+        text: userCommandText(message.text),
+        backend: 'gjc-jsonl',
+      });
+      continue;
+    }
+    if (message.role === 'assistant' && message.phase === 'final_answer' && message.text) {
+      events.push({
+        eventId: `${sessionId}:${message.id}`,
+        type: 'FinalAnswer',
+        source: 'gjc-log',
+        timestamp: message.timestamp,
+        text: message.text,
+        backend: 'gjc-jsonl',
+        phase: 'final_answer',
+      });
+      events.push({
+        eventId: `${sessionId}:${message.id}:idle`,
+        type: 'SessionIdle',
+        source: 'gjc-log',
+        timestamp: message.timestamp,
+        text: '작업 완료. 다음 지시를 기다리는 상태입니다.',
+        backend: 'gjc-jsonl',
+        phase: 'idle',
+      });
+    }
+  }
+  return sorted(events);
+}
+
+async function readGjcSessionEvents(session = {}) {
+  if (!session.sessionLogPath) return [];
+  const log = await readGjcLog(session.sessionLogPath);
+  return gjcSessionEvents(session, log);
+}
+
 export async function readCodexFallbackEvents(session = {}, options = {}) {
   const logRefs = [
     session.sessionLogPath ? {
@@ -298,6 +344,10 @@ export async function routeSessionEvents(session = {}, options = {}) {
   const projectRoot = options.projectRoot || process.cwd();
   const bridgeProjectRoot = options.bridgeProjectRoot || options.controlPlaneRoot || projectRoot;
   const events = [];
+
+  if (session.backend === 'gjc' || session.gjcSessionId) {
+    return readGjcSessionEvents(session);
+  }
   const sessionEventId = session.hasOmxLifecycle !== false && session.omxSessionId
     ? session.omxSessionId
     : session.bridgeSessionId || session.codexSessionId || session.threadId || session.tmuxPaneId || session.tmuxId || session.omxSessionId || 'unknown-session';

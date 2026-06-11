@@ -101,6 +101,58 @@ test('eventToDiscordChunks renders markdown tables as Discord-safe aligned text'
 });
 
 
+test('pollDiscordNotifications sends opt-in GJC FinalAnswer without codex-only opt-in', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'gjc-discord-project-'));
+  const sessionsRoot = join(root, 'gjc-sessions');
+  const statePath = join(root, 'state.json');
+  const sessionId = '019e9000-4444-7000-aaaa-ffffffffffff';
+  await mkdir(join(sessionsRoot, 'project'), { recursive: true });
+  await writeFile(join(sessionsRoot, 'project', `${sessionId}.jsonl`), [
+    { type: 'session', version: 3, id: sessionId, timestamp: '2026-06-04T10:00:00.000Z', cwd: root, title: 'GJC Discord session' },
+    { type: 'message', id: 'gjc-user-1', timestamp: '2026-06-04T10:00:01.000Z', message: { role: 'user', content: [{ type: 'text', text: '안녕 테스트 한줄 출력' }] } },
+    { type: 'message', id: 'gjc-final-1', timestamp: '2026-06-04T10:00:02.000Z', message: { role: 'assistant', content: [{ type: 'text', text: '안녕 테스트 한줄 출력' }] }, stopReason: 'stop' },
+  ].map((line) => JSON.stringify(line)).join('\n'));
+  const tmuxBin = join(root, 'fake-gjc-tmux.sh');
+  await writeFile(tmuxBin, `#!/bin/sh
+case "$1" in
+  list-panes)
+    printf 'gjc-managed\t%%88\t4242\t0\t%s\t1\tgjc\tgjc\t%s\towner-key\t2026-06-04T10:00:00.000Z\t%s\n' ${JSON.stringify(root)} ${JSON.stringify(basename(root))} ${JSON.stringify(sessionId)}
+    ;;
+  list-sessions)
+    printf 'gjc-managed\t1777379336\t1\t1\tgjc\tgjc\t%s\towner-key\t2026-06-04T10:00:00.000Z\t%s\n' ${JSON.stringify(basename(root))} ${JSON.stringify(sessionId)}
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`);
+  await chmod(tmuxBin, 0o755);
+
+  const posts = [];
+  await withEnv({ GJC_SESSIONS_ROOT: sessionsRoot, TMUX_BIN: tmuxBin }, async () => {
+    const result = await pollDiscordNotifications({
+      projectRoot: root,
+      discoverTmuxProjectRoots: false,
+      statePath,
+      webhookUrl: 'https://discord.test/webhook',
+      eventTypes: new Set(['FinalAnswer']),
+      allowDiscordFinalAnswerNotifications: true,
+      replay: true,
+      fetchFn: async (_url, request = {}) => {
+        posts.push(JSON.parse(request.body));
+        return { ok: true };
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.sent, 1);
+  });
+
+  assert.equal(posts.length, 1);
+  assert.match(posts[0].content, /# Session Idle/);
+  assert.match(posts[0].content, /안녕 테스트 한줄 출력/);
+});
+
 test('pollDiscordNotifications ignores FinalAnswer and SessionIdle by default even when env-like event types include them', async () => {
   const root = await mkdtemp(join(tmpdir(), 'omx-bridge-discord-no-final-'));
   const codexHome = join(root, 'codex-home');

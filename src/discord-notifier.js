@@ -223,6 +223,9 @@ function shouldPollSession(session = {}, options = {}) {
   if (session.kind === 'omx-team' && suppressTeamWorkerNotifications(options)) return false;
   if (session.isAuxiliaryCodexLog === true && session.hasOmxLifecycle !== true) return false;
   if (isNativeOnlyLifecyclePollution(session)) return false;
+  if (session.backend === 'gjc' || session.lifecycleOwner === 'gjc' || session.gjcSessionId) {
+    return session.status === 'active' || Boolean(session.tmuxId || session.tmuxPaneId || session.gjcProfile === '1');
+  }
   if (session.hasOmxLifecycle === false && options.allowCodexOnlySessionMonitoring !== true) return false;
   if (options.allowUnmappedCodexLogNotifications === true || includeUnmappedCodexLogs(options)) return true;
   return session.hasOmxLifecycle !== false;

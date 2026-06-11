@@ -116,6 +116,33 @@ test('gjc session discovery reads configured XDG session roots', async () => {
   });
 });
 
+test('routeSessionEvents converts GJC JSONL messages into notification events', async () => {
+  const homeRoot = await mkdtemp(join(tmpdir(), 'gjc-events-home-'));
+  const xdgRoot = await mkdtemp(join(tmpdir(), 'gjc-events-xdg-'));
+  const projectRoot = await mkdtemp(join(tmpdir(), 'gjc-events-project-'));
+  const sessionId = '019e9000-3333-7000-eeee-ffffffffffff';
+
+  await writeGjcSession(join(xdgRoot, 'gjc', 'sessions'), sessionId, gjcSessionLines({
+    sessionId,
+    cwd: projectRoot,
+    startedAt: '2026-06-04T10:00:00.000Z',
+    userText: '안녕 테스트 한줄 출력',
+    assistantText: '안녕 테스트 한줄 출력',
+  }), { relativePath: `${projectRoot.split('/').pop()}/${sessionId}.jsonl` });
+
+  await withEnv({ HOME: homeRoot, XDG_DATA_HOME: xdgRoot, GJC_SESSIONS_ROOT: undefined }, async () => {
+    const sessions = await listSessions({ projectRoot, sessionScanLimit: 10 });
+    const session = sessions.find((candidate) => candidate.gjcSessionId === sessionId);
+
+    const events = await routeSessionEvents(session, { projectRoot });
+
+    assert.deepEqual(events.map((event) => event.type), ['CommandSubmitted', 'FinalAnswer', 'SessionIdle']);
+    assert.equal(events[0].source, 'gjc-log');
+    assert.equal(events[1].text, '안녕 테스트 한줄 출력');
+    assert.equal(events[1].phase, 'final_answer');
+  });
+});
+
 test('registry includes gjc sessions by default and resolves gjc identifiers', async () => {
   const homeRoot = await mkdtemp(join(tmpdir(), 'gjc-registry-home-'));
   const xdgRoot = await mkdtemp(join(tmpdir(), 'gjc-registry-xdg-'));
